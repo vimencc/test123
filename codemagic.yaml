@@ -7,15 +7,15 @@ workflows:
     integrations:
       app_store_connect:
       api_key:4BJ4P56482
-      key_id:codemagic_Production
-      issuer_id:81d1e825-44a1-4d6d-8745-b2bda57f70be
+      key_id:"codemagic_Production"
+      issuer_id:"81d1e825-44a1-4d6d-8745-b2bda57f70be"
     environment:
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.test.ios.attaf
       vars:
         BUNDLE_ID: "com.test.ios.attaf"
-        XCODE_WORKSPACE: "123.xcworkspace" # <-- Put the name of your Xcode workspace here
+        XCODE_WORKSPACE: ç123.xcworkspace" # <-- Put the name of your Xcode workspace here
         XCODE_SCHEME: "123" # <-- Put the name of your Xcode scheme here
         APP_STORE_APPLE_ID: 6474600898
       xcode: latest
