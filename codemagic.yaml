@@ -8,7 +8,7 @@ workflows:
       app_store_connect: codemagic
     environment:
       ios_signing:
-        distribution_type: ioscodemagic_production
+        distribution_type: app_store
         bundle_identifier: com.test.ios.attaf
       vars:
         BUNDLE_ID: "com.test.ios.attaf"
