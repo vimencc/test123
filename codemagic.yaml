@@ -1,7 +1,7 @@
 
 workflows:
   ios-native-workflow:
-    name: iOS automatic code signing
+    name: iOS Native
     max_build_duration: 120
     instance_type: mac_mini_m2
     integrations:
@@ -12,7 +12,7 @@ workflows:
         bundle_identifier: com.test.ios.attaf
       vars:
         BUNDLE_ID: "com.test.ios.attaf"
-        XCODE_WORKSPACE: ç123.xcworkspace" # <-- Put the name of your Xcode workspace here
+        XCODE_WORKSPACE: "123.xcworkspace" # <-- Put the name of your Xcode workspace here
         XCODE_SCHEME: "123" # <-- Put the name of your Xcode scheme here
         APP_STORE_APPLE_ID: 6474600898
       xcode: latest
