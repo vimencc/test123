@@ -1,4 +1,4 @@
-# codemagic.yaml
+# 更简化的版本，移除缓存
 workflows:
   ios-release:
     name: iOS App Store Release
@@ -9,160 +9,52 @@ workflows:
         - appstore_connect
       vars:
         APP_IDENTIFIER: "com.test.ios.attaf"
-        APPLE_ID: "lingya00130@gmail.com"
         TEAM_ID: "7994453ZHZ"
         SCHEME: "123"
-        BUILD_NUMBER: "$(date +%Y%m%d%H%M)"
-    
-    # 正确的缓存配置
-    cache:
-      paths:
-        - vendor/bundle
     
     scripts:
-      - name: Setup fastlane environment
+      - name: Build with fastlane
         script: |
-          echo "=== Setting up fastlane ==="
-          echo "App: $APP_IDENTIFIER"
-          echo "Team: $TEAM_ID"
-          echo "Scheme: $SCHEME"
-          
           # 安装 fastlane
           sudo gem install fastlane -NV
           
-          # 创建 fastlane 目录
+          # 创建 fastlane 配置
           mkdir -p fastlane
-      
-      - name: Configure fastlane
-        script: |
-          echo "=== Creating fastlane configuration ==="
           
-          # Appfile
-          cat > fastlane/Appfile << EOF
-          app_identifier "$APP_IDENTIFIER"
-          apple_id "$APPLE_ID"
-          team_id "$TEAM_ID"
-          EOF
-          
-          # Fastfile
           cat > fastlane/Fastfile << EOF
           default_platform(:ios)
           
           platform :ios do
             lane :release do
-              # 设置构建号
-              if ENV['BUILD_NUMBER']
-                increment_build_number(
-                  build_number: ENV['BUILD_NUMBER']
-                )
-              end
-              
-              # 构建 IPA
               gym(
-                workspace: "$SCHEME.xcworkspace",
-                scheme: "$SCHEME",
-                configuration: "Release",
-                output_directory: "../build",
-                output_name: "$SCHEME.ipa",
+                workspace: "123.xcworkspace",
+                scheme: "123",
                 export_method: "app-store",
-                export_options: {
-                  method: "app-store",
-                  teamID: "$TEAM_ID",
-                  uploadBitcode: false,
-                  compileBitcode: false,
-                  uploadSymbols: true
-                },
-                clean: true,
-                silent: false,
-                skip_package_ipa: false,
-                skip_archive: false,
-                include_symbols: true,
-                include_bitcode: false
-              )
-              
-              # 验证构建
-              verify_build(
-                app_identifier: "$APP_IDENTIFIER"
+                output_directory: "build",
+                clean: true
               )
             end
           end
           EOF
           
-          echo "✅ Fastlane configuration created"
-      
-      - name: Run fastlane release build
-        script: |
-          echo "=== Starting fastlane release build ==="
+          # 运行构建
           cd fastlane
           fastlane ios release
-          cd ..
-          echo "✅ Fastlane build completed"
       
-      - name: Verify build artifacts
+      - name: Check build
         script: |
-          echo "=== Verifying build artifacts ==="
-          
-          if [ -f "build/$SCHEME.ipa" ]; then
-            IPA_FILE="build/$SCHEME.ipa"
+          if ls build/*.ipa 1> /dev/null 2>&1; then
+            echo "✅ Build successful!"
+            ls -lh build/*.ipa
           else
-            IPA_FILE=$(find . -name "*.ipa" -type f | head -1)
-          fi
-          
-          if [ -n "$IPA_FILE" ] && [ -f "$IPA_FILE" ]; then
-            echo "✅ IPA file found: $IPA_FILE"
-            echo "File size: $(du -h "$IPA_FILE" | cut -f1)"
-            
-            # 确保在 build 目录
-            mkdir -p build
-            if [ "$IPA_FILE" != "build/$SCHEME.ipa" ]; then
-              cp "$IPA_FILE" "build/$SCHEME.ipa"
-              echo "✅ IPA copied to build directory"
-            fi
-          else
-            echo "❌ No IPA file found"
-            find . -name "*.ipa" -type f
+            echo "❌ Build failed"
             exit 1
-          fi
-      
-      - name: Prepare for App Store Connect
-        script: |
-          echo "=== Preparing for App Store Connect ==="
-          
-          if [ -z "$APP_STORE_CONNECT_API_KEY" ] || \
-             [ -z "$APP_STORE_CONNECT_KEY_IDENTIFIER" ] || \
-             [ -z "$APP_STORE_CONNECT_ISSUER_ID" ]; then
-            echo "⚠️ App Store Connect API keys not configured"
-          else
-            echo "✅ App Store Connect API keys configured"
-            
-            # 创建 API 密钥文件
-            cat > fastlane/AppStoreConnectApiKey.json << EOF
-            {
-              "key_id": "$APP_STORE_CONNECT_KEY_IDENTIFIER",
-              "issuer_id": "$APP_STORE_CONNECT_ISSUER_ID",
-              "key": "$APP_STORE_CONNECT_API_KEY",
-              "duration": 1200,
-              "in_house": false
-            }
-            EOF
-            
-            echo "API key file created"
           fi
     
     artifacts:
       - build/*.ipa
-      - build/*.xcarchive
-      - fastlane/Appfile
-      - fastlane/Fastfile
     
     publishing:
-      email:
-        recipients:
-          - "lingya00130@gmail.com"
-        notify:
-          success: true
-          failure: true
-      
       app_store_connect:
         api_key: $APP_STORE_CONNECT_API_KEY
         key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
