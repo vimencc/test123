@@ -1,43 +1,61 @@
 workflows:
-  ios-simple-fastlane:
-    name: iOS Simple Fastlane
+  ios-hybrid:
+    name: iOS Hybrid Build
     environment:
       xcode: latest
       groups:
         - appstore_signing
     
     scripts:
-      - name: One-step fastlane build
+      - name: Step 1: Manual provisioning setup
         script: |
-          # 最简单的方法：直接使用 fastlane gym
+          echo "=== Step 1: Manual provisioning setup ==="
+          
+          # 下载描述文件
+          curl -L -o profile.mobileprovision "$APPSTORE_PROVISIONING_PROFILE_URL"
+          
+          # 安装到系统位置
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles/
+          cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/codemagic_Production.mobileprovision
+          
+          echo "Provisioning profile installed"
+          ls -la ~/Library/MobileDevice/Provisioning\ Profiles/
+      
+      - name: Step 2: Build with fastlane
+        script: |
+          echo "=== Step 2: Build with fastlane ==="
+          
+          # 安装 fastlane
           sudo gem install fastlane -NV
           
-          # 直接调用 gym，不创建 Fastfile
-          fastlane run gym \
-            workspace:"123.xcworkspace" \
-            scheme:"123" \
-            export_method:"app-store" \
-            output_directory:"build" \
-            clean:true
+          # 最简单的构建
+          echo 'lane :build do
+            gym(
+              workspace: "123.xcworkspace",
+              scheme: "123",
+              export_method: "app-store",
+              output_directory: "build"
+            )
+          end' > Fastfile
           
-          echo "Build attempt completed"
-          ls build/*.ipa 2>/dev/null || echo "Checking for IPA..."
+          fastlane build
       
-      - name: Fallback if needed
+      - name: Step 3: Final verification
         script: |
-          # 如果上面失败，尝试这个
-          if [ ! -f "build/*.ipa" ]; then
-            echo "Trying alternative approach..."
-            
-            # 使用 xcodebuild 但让 fastlane 处理签名
-            fastlane run build_ios_app \
-              workspace:"123.xcworkspace" \
-              scheme:"123" \
-              export_method:"app-store"
-          fi
+          echo "=== Step 3: Verification ==="
           
-          # 最终检查
-          find . -name "*.ipa" -type f | xargs ls -lh 2>/dev/null || echo "No IPA files"
+          COUNT=$(find . -name "*.ipa" -type f | wc -l)
+          if [ "$COUNT" -gt 0 ]; then
+            echo "✅ Found $COUNT IPA file(s)"
+            find . -name "*.ipa" -type f | xargs ls -lh
+            
+            # 确保在 build 目录
+            mkdir -p build
+            find . -name "*.ipa" -type f ! -path "./build/*" -exec cp {} build/ \;
+          else
+            echo "❌ No IPA files found"
+            exit 1
+          fi
     
     artifacts:
       - build/*.ipa
