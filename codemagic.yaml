@@ -1,4 +1,4 @@
-# 简化版本
+# codemagic.yaml - 简化版
 workflows:
   ios-release:
     name: iOS Release
@@ -13,20 +13,27 @@ workflows:
         PROVISIONING_PROFILE_NAME: "codemagic Production"
     
     scripts:
-      - name: Build iOS app
+      - name: Build iOS IPA
         script: |
-          # 简单构建命令
+          echo "Building iOS app..."
+          
+          # 1. 清理
+          rm -rf build 2>/dev/null || true
+          mkdir -p build
+          
+          # 2. 归档
           xcodebuild archive \
             -workspace "123.xcworkspace" \
-            -scheme "123" \
+            -scheme "$SCHEME" \
             -configuration Release \
-            -archivePath "build/123.xcarchive" \
+            -archivePath "build/$SCHEME.xcarchive" \
+            -destination 'generic/platform=iOS' \
+            -allowProvisioningUpdates \
             PROVISIONING_PROFILE_SPECIFIER="$PROVISIONING_PROFILE_NAME" \
-            DEVELOPMENT_TEAM="$TEAM_ID" \
-            CODE_SIGN_STYLE="Manual"
+            DEVELOPMENT_TEAM="$TEAM_ID"
           
-          # 导出
-          cat > exportOptions.plist << EOF
+          # 3. 导出
+          cat > export.plist << EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -45,9 +52,20 @@ workflows:
           EOF
           
           xcodebuild -exportArchive \
-            -archivePath "build/123.xcarchive" \
+            -archivePath "build/$SCHEME.xcarchive" \
             -exportPath "build" \
-            -exportOptionsPlist "exportOptions.plist"
+            -exportOptionsPlist "export.plist" \
+            -allowProvisioningUpdates
+          
+          echo "Build completed!"
+          ls -lh build/*.ipa
     
     artifacts:
       - build/*.ipa
+    
+    publishing:
+      app_store_connect:
+        api_key: $APP_STORE_CONNECT_API_KEY
+        key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
+        issuer_id: $APP_STORE_CONNECT_ISSUER_ID
+        submit_to_testflight: true
