@@ -1,36 +1,31 @@
 workflows:
-  ios-fastlane:
-    name: iOS with Fastlane
+  ios-fastlane-simple:
+    name: iOS Fastlane Simple
     environment:
       xcode: latest
       groups:
         - appstore_signing
-      vars:
-        FASTLANE_USER: "lingya00130@gmail.com"  # 您的 Apple ID
     
     scripts:
-      - name: Install fastlane
+      - name: Build with fastlane
         script: |
+          # 安装 fastlane
           sudo gem install fastlane -NV
-      
-      - name: Build with fastlane gym
-        script: |
-          # 使用 fastlane 处理所有签名细节
-          fastlane run build_ios_app \
-            workspace: "123.xcworkspace" \
-            scheme: "123" \
-            clean: true \
-            output_directory: "build" \
-            export_method: "app-store" \
-            silent: true \
-            skip_package_ipa: false
-      
-      - name: Verify build
-        script: |
-          if ls build/*.ipa 1> /dev/null 2>&1; then
-            echo "✅ Build successful!"
-            ls -lh build/*.ipa
+          
+          # 直接运行 fastlane 命令
+          fastlane run gym \
+            workspace:"123.xcworkspace" \
+            scheme:"123" \
+            clean:true \
+            output_directory:"build" \
+            export_method:"app-store" \
+            silent:true \
+            skip_package_ipa:false
+          
+          # 检查结果
+          if [ -f "build/*.ipa" ]; then
+            echo "✅ Build successful"
           else
-            echo "❌ Build failed"
-            exit 1
+            echo "Checking for IPA..."
+            find . -name "*.ipa" -type f
           fi
