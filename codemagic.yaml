@@ -9,23 +9,42 @@ workflows:
     scripts:
       - name: Build iOS
         script: |
-          # 最简单的构建
+          # 安装 fastlane
           sudo gem install fastlane -NV
           
+          # 创建正确的 fastlane 配置
           mkdir -p fastlane
+          
+          # 创建 Fastfile - 注意：使用 default_platform
           cat > fastlane/Fastfile << 'EOF'
-          lane :build do
-            gym(
-              workspace: "123.xcworkspace",
-              scheme: "123",
-              export_method: "app-store",
-              output_directory: "build"
-            )
+          default_platform(:ios)
+          
+          platform :ios do
+            lane :build do
+              gym(
+                workspace: "123.xcworkspace",
+                scheme: "123",
+                export_method: "app-store",
+                output_directory: "build"
+              )
+            end
           end
           EOF
           
+          # 运行正确的 lane
           cd fastlane
-          fastlane ios build
+          fastlane build  # 注意：是 fastlane build，不是 fastlane ios build
+      
+      - name: Check build result
+        script: |
+          if ls build/*.ipa 1> /dev/null 2>&1; then
+            echo "✅ Build successful!"
+            ls -lh build/*.ipa
+          else
+            echo "❌ Build failed - checking for errors"
+            find . -name "*.log" -type f | xargs tail -100 2>/dev/null || true
+            exit 1
+          fi
     
     artifacts:
       - build/*.ipa
