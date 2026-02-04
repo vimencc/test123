@@ -8,99 +8,104 @@ workflows:
         - appstore_signing
     
     scripts:
-      - name: Build iOS app
+      - name: Build with fastlane (proven to work)
         script: |
-          echo "=== Building iOS app ==="
+          echo "=== Building with fastlane ==="
           
-          # 方法 1: 直接使用 xcodebuild（处理空格）
-          echo "Method 1: Using xcodebuild directly"
+          # 安装 fastlane
+          sudo gem install fastlane -NV
           
-          # 清理
-          rm -rf build 2>/dev/null || true
-          mkdir -p build
+          # 创建 fastlane 目录和配置文件
+          mkdir -p fastlane
           
-          # **关键：处理可能的空格问题**
-          # 尝试不同的 scheme 格式
-          SCHEME_ATTEMPTS=("123" "\"123 \"" "'123 '" "123\\ ")
-          
-          for SCHEME in "${SCHEME_ATTEMPTS[@]}"; do
-            echo "Trying scheme: $SCHEME"
-            
-            # 测试是否能列出 scheme
-            if xcodebuild -workspace "123.xcworkspace" -list 2>&1 | grep -q "123"; then
-              echo "Scheme found, attempting archive..."
-              
-              # 尝试归档
-              if xcodebuild archive \
-                -workspace "123.xcworkspace" \
-                -scheme "123" \
-                -configuration Release \
-                -archivePath "build/123.xcarchive" \
-                -destination 'generic/platform=iOS' \
-                -allowProvisioningUpdates 2>&1 | tee build.log; then
-                
-                echo "✅ Archive successful!"
-                break
-              else
-                echo "❌ Archive failed with scheme: $SCHEME"
-                tail -20 build.log
-              fi
-            fi
-          done
-          
-          # 检查归档是否成功
-          if [ -d "build/123.xcarchive" ]; then
-            echo "Archive created successfully"
-          else
-            echo "Trying alternative approach..."
-            
-            # 方法 2: 使用 xcodebuild 不带引号
-            xcodebuild archive \
-              -workspace 123.xcworkspace \
-              -scheme 123 \
-              -configuration Release \
-              -archivePath build/123.xcarchive \
-              -allowProvisioningUpdates
-          fi
-      
-      - name: Export IPA
-        script: |
-          echo "=== Exporting IPA ==="
-          
-          # 创建 exportOptions.plist
-          cat > exportOptions.plist << EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>method</key>
-              <string>app-store</string>
-              <key>teamID</key>
-              <string>7994453ZHZ</string>
-              <key>uploadBitcode</key>
-              <false/>
-              <key>compileBitcode</key>
-              <false/>
-          </dict>
-          </plist>
+          # 创建 Appfile（包含签名信息）
+          cat > fastlane/Appfile << EOF
+          app_identifier "com.test.ios.attaf"
+          apple_id "lingya00130@gmail.com"
+          team_id "7994453ZHZ"
           EOF
           
-          # 导出 IPA
-          xcodebuild -exportArchive \
-            -archivePath "build/123.xcarchive" \
-            -exportPath "build" \
-            -exportOptionsPlist "exportOptions.plist" \
-            -allowProvisioningUpdates
+          # 创建 Fastfile（使用之前成功的配置）
+          cat > fastlane/Fastfile << 'EOF'
+          default_platform(:ios)
           
-          # 检查结果
+          platform :ios do
+            lane :release do
+              # 使用 gym 构建 IPA
+              gym(
+                workspace: "123.xcworkspace",
+                scheme: "123",
+                configuration: "Release",
+                output_directory: "build",
+                export_method: "app-store",
+                clean: true,
+                silent: false,
+                skip_package_ipa: false
+              )
+            end
+          end
+          EOF
+          
+          echo "Fastlane configuration created"
+          echo "Contents of Fastfile:"
+          cat fastlane/Fastfile
+          
+          # 运行构建
+          cd fastlane
+          echo "Starting fastlane build..."
+          fastlane ios release
+          cd ..
+          
+          echo "Fastlane build process completed"
+      
+      - name: Verify and collect artifacts
+        script: |
+          echo "=== Verifying build artifacts ==="
+          
+          # 检查 IPA 文件
           if ls build/*.ipa 1> /dev/null 2>&1; then
-            echo "✅ IPA exported successfully!"
+            echo "✅ IPA file found!"
             ls -lh build/*.ipa
+            
+            # 验证 IPA 内容
+            IPA_FILE=$(ls build/*.ipa | head -1)
+            echo "IPA details:"
+            echo "File: $IPA_FILE"
+            echo "Size: $(du -h "$IPA_FILE" | cut -f1)"
+            
+            # 检查包含的应用
+            echo "Checking app inside IPA..."
+            unzip -l "$IPA_FILE" | grep "Payload/" | head -3
           else
-            echo "❌ IPA export failed"
+            echo "❌ No IPA file found in build directory"
+            echo "Searching for IPA files..."
+            find . -name "*.ipa" -type f | xargs ls -lh 2>/dev/null || echo "No IPA files found anywhere"
+            
+            # 检查 fastlane 日志
+            echo "Checking fastlane logs..."
+            find fastlane -name "*.log" -type f | head -3
             exit 1
           fi
+      
+      - name: Prepare for distribution
+        script: |
+          echo "=== Preparing for distribution ==="
+          
+          # 确保 IPA 在正确的位置
+          mkdir -p build
+          
+          # 如果 IPA 不在 build 目录，复制过去
+          IPA_FILES=$(find . -name "*.ipa" -type f ! -path "./build/*")
+          for IPA in $IPA_FILES; do
+            echo "Found IPA: $IPA"
+            cp "$IPA" build/
+          done
+          
+          echo "Final build directory:"
+          ls -la build/
     
     artifacts:
       - build/*.ipa
-      - exportOptions.plist
+      - fastlane/Appfile
+      - fastlane/Fastfile
+      - fastlane/logs/*.log
