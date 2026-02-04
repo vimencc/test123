@@ -6,31 +6,18 @@ workflows:
       xcode: latest
       groups:
         - appstore_signing
-        - appstore_connect  # 添加 App Store Connect API 密钥组
+        - appstore_connect
       vars:
-        # 基础配置
         APP_IDENTIFIER: "com.test.ios.attaf"
         APPLE_ID: "lingya00130@gmail.com"
         TEAM_ID: "7994453ZHZ"
         SCHEME: "123"
-        
-        # 版本管理（可选）
-        BUILD_NUMBER: "$(date +%Y%m%d%H%M)"  # 自动生成构建号
+        BUILD_NUMBER: "$(date +%Y%m%d%H%M)"
     
-    triggering:
-      events:
-        - push
-      branch_patterns:
-        - pattern: 'main'
-          include: true
-        - pattern: 'release/*'
-          include: true
-      cancel_previous_builds: false
-    
+    # 正确的缓存配置
     cache:
       paths:
-        - vendor/bundle  # 缓存 fastlane gems
-        - fastlane/logs
+        - vendor/bundle
     
     scripts:
       - name: Setup fastlane environment
@@ -40,7 +27,7 @@ workflows:
           echo "Team: $TEAM_ID"
           echo "Scheme: $SCHEME"
           
-          # 安装 fastlane（如果已缓存会更快）
+          # 安装 fastlane
           sudo gem install fastlane -NV
           
           # 创建 fastlane 目录
@@ -50,29 +37,20 @@ workflows:
         script: |
           echo "=== Creating fastlane configuration ==="
           
-          # 1. Appfile - 应用配置
+          # Appfile
           cat > fastlane/Appfile << EOF
-          # 应用标识符
           app_identifier "$APP_IDENTIFIER"
-          
-          # Apple ID
           apple_id "$APPLE_ID"
-          
-          # 团队 ID
           team_id "$TEAM_ID"
-          
-          # 可选：iTunes Connect 团队（如果有多个团队）
-          # itc_team_id "$TEAM_ID"
           EOF
           
-          # 2. Fastfile - 构建流程
+          # Fastfile
           cat > fastlane/Fastfile << EOF
           default_platform(:ios)
           
           platform :ios do
-            # 发布到 App Store 的完整流程
-            lane :release do |options|
-              # 可选：设置构建号
+            lane :release do
+              # 设置构建号
               if ENV['BUILD_NUMBER']
                 increment_build_number(
                   build_number: ENV['BUILD_NUMBER']
@@ -81,29 +59,19 @@ workflows:
               
               # 构建 IPA
               gym(
-                # 项目配置
                 workspace: "$SCHEME.xcworkspace",
                 scheme: "$SCHEME",
                 configuration: "Release",
-                
-                # 输出配置
                 output_directory: "../build",
                 output_name: "$SCHEME.ipa",
-                
-                # 导出配置
                 export_method: "app-store",
                 export_options: {
                   method: "app-store",
                   teamID: "$TEAM_ID",
                   uploadBitcode: false,
                   compileBitcode: false,
-                  uploadSymbols: true,
-                  provisioningProfiles: {
-                    "$APP_IDENTIFIER" => "codemagic Production"
-                  }
+                  uploadSymbols: true
                 },
-                
-                # 其他选项
                 clean: true,
                 silent: false,
                 skip_package_ipa: false,
@@ -117,17 +85,6 @@ workflows:
                 app_identifier: "$APP_IDENTIFIER"
               )
             end
-            
-            # 快速测试构建
-            lane :test_build do
-              gym(
-                workspace: "$SCHEME.xcworkspace",
-                scheme: "$SCHEME",
-                configuration: "Debug",
-                clean: true,
-                skip_package_ipa: false
-              )
-            end
           end
           EOF
           
@@ -136,37 +93,24 @@ workflows:
       - name: Run fastlane release build
         script: |
           echo "=== Starting fastlane release build ==="
-          
-          # 进入 fastlane 目录
           cd fastlane
-          
-          # 运行 release lane
           fastlane ios release
-          
-          # 返回项目根目录
           cd ..
-          
           echo "✅ Fastlane build completed"
       
       - name: Verify build artifacts
         script: |
           echo "=== Verifying build artifacts ==="
           
-          # 检查 IPA 文件
           if [ -f "build/$SCHEME.ipa" ]; then
             IPA_FILE="build/$SCHEME.ipa"
           else
-            # 查找任何 IPA 文件
             IPA_FILE=$(find . -name "*.ipa" -type f | head -1)
           fi
           
           if [ -n "$IPA_FILE" ] && [ -f "$IPA_FILE" ]; then
             echo "✅ IPA file found: $IPA_FILE"
             echo "File size: $(du -h "$IPA_FILE" | cut -f1)"
-            
-            # 验证 IPA 内容
-            echo "IPA content overview:"
-            unzip -l "$IPA_FILE" | grep "Payload/" | head -5
             
             # 确保在 build 目录
             mkdir -p build
@@ -176,7 +120,6 @@ workflows:
             fi
           else
             echo "❌ No IPA file found"
-            echo "Searching for files:"
             find . -name "*.ipa" -type f
             exit 1
           fi
@@ -185,16 +128,14 @@ workflows:
         script: |
           echo "=== Preparing for App Store Connect ==="
           
-          # 检查是否配置了 App Store Connect API 密钥
           if [ -z "$APP_STORE_CONNECT_API_KEY" ] || \
              [ -z "$APP_STORE_CONNECT_KEY_IDENTIFIER" ] || \
              [ -z "$APP_STORE_CONNECT_ISSUER_ID" ]; then
             echo "⚠️ App Store Connect API keys not configured"
-            echo "Build will complete but won't be uploaded to App Store Connect"
           else
             echo "✅ App Store Connect API keys configured"
             
-            # 创建 fastlane API 密钥配置
+            # 创建 API 密钥文件
             cat > fastlane/AppStoreConnectApiKey.json << EOF
             {
               "key_id": "$APP_STORE_CONNECT_KEY_IDENTIFIER",
@@ -205,7 +146,7 @@ workflows:
             }
             EOF
             
-            echo "App Store Connect API key file created"
+            echo "API key file created"
           fi
     
     artifacts:
@@ -213,11 +154,8 @@ workflows:
       - build/*.xcarchive
       - fastlane/Appfile
       - fastlane/Fastfile
-      - fastlane/logs/*.log
-      - fastlane/README.md
     
     publishing:
-      # 邮件通知
       email:
         recipients:
           - "lingya00130@gmail.com"
@@ -225,27 +163,8 @@ workflows:
           success: true
           failure: true
       
-      # 发布到 App Store Connect (TestFlight)
       app_store_connect:
         api_key: $APP_STORE_CONNECT_API_KEY
         key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
         issuer_id: $APP_STORE_CONNECT_ISSUER_ID
         submit_to_testflight: true
-        beta_groups:  # 可选：测试组
-          - "Internal Testers"
-        # 可选：自动提交到 App Store Review
-        # submit_to_app_store: false
-        # 可选：跳过等待处理完成
-        # skip_waiting_for_build_processing: false
-      
-      # 可选：发布到 Firebase App Distribution
-      # firebase:
-      #   firebase_token: $FIREBASE_TOKEN
-      #   app_id: $FIREBASE_APP_ID
-      #   groups:
-      #     - testers
-      
-      # 可选：发布到 Slack
-      # slack:
-      #   channel: '#ios-builds'
-      #   webhook: $SLACK_WEBHOOK_URL
