@@ -1,82 +1,45 @@
-# codemagic.yaml
+# codemagic.yaml - 简化版
 workflows:
-  appstore-release:
-    name: iOS App Store Release
+  ios-release:
+    name: iOS Release
     environment:
       xcode: latest
       groups:
-        - appstore_signing  # 生产证书组
+        - appstore_signing
       vars:
-        BUNDLE_ID: "com.test.ios.attaf"  # 替换为您的 Bundle ID
-        SCHEME: "123"  # 替换为您的 Scheme
+        BUNDLE_ID: "com.test.ios.attaf"
+        SCHEME: "123"
+        TEAM_ID: "7994453ZHZ"  # 获取方法见下文
     
-    # iOS 自动代码签名配置 - 使用生产证书
+    # 如果您的项目在 ios 目录下
     ios:
-      project: "123.xcodeproj"  # 或者 YourApp.xcworkspace
-      scheme: "$123"
-      configuration: "Release"
-      # 代码签名配置
-      signing:
-        certificate_url: $APPSTORE_CERTIFICATE_URL
-        certificate_password: $APPSTORE_CERTIFICATE_PASSWORD
-        provisioning_profile_url: $APPSTORE_PROVISIONING_PROFILE_URL
+      project: "ios/123.xcodeproj"  # 或 "ios/123.xcworkspace"
+      scheme: "$SCHEME"
     
-    # 构建脚本
     scripts:
-      - name: Set up environment
+      - name: Build iOS app
         script: |
-          # 设置版本号
-          if [ ! -z "$BUILD_NUMBER" ]; then
-            agvtool new-version -all $BUILD_NUMBER
-          fi
-      
-      - name: Install dependencies
-        script: |
-          # 安装 CocoaPods 依赖
-          pod install --repo-update
-      
-      - name: Build and archive
-        script: |
-          # 构建归档
-          xcodebuild archive \
-            -workspace "YourApp.xcworkspace" \
-            -scheme "$SCHEME" \
-            -configuration Release \
-            -archivePath "build/YourApp.xcarchive" \
-            -destination 'generic/platform=iOS'
-      
-      - name: Export IPA
-        script: |
-          # 创建 exportOptions.plist 文件
-          cat > exportOptions.plist << EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>method</key>
-              <string>app-store</string>
-              <key>teamID</key>
-              <string>$TEAM_ID</string>
-              <key>uploadBitcode</key>
-              <false/>
-              <key>compileBitcode</key>
-              <false/>
-          </dict>
-          </plist>
-          EOF
+          cd ios
           
-          # 导出 IPA
-          xcodebuild -exportArchive \
-            -archivePath "build/YourApp.xcarchive" \
-            -exportPath "build" \
-            -exportOptionsPlist "exportOptions.plist"
+          # 自动检测使用 workspace 还是 project
+          if [ -f "$SCHEME.xcworkspace" ]; then
+            echo "Building with workspace: $SCHEME.xcworkspace"
+            xcode-project build-ipa \
+              --workspace "$SCHEME.xcworkspace" \
+              --scheme "$SCHEME" \
+              --export-options-plist "exportOptions.plist"
+          else
+            echo "Building with project: $SCHEME.xcodeproj"
+            xcode-project build-ipa \
+              --project "$SCHEME.xcodeproj" \
+              --scheme "$SCHEME" \
+              --export-options-plist "exportOptions.plist"
+          fi
     
-    # 产物
     artifacts:
-      - build/*.ipa
-      - build/*.dSYM.zip
+      - build/ios/ipa/*.ipa
+      - build/ios/archive/*.xcarchive
     
-    # 发布到 App Store Connect
     publishing:
       app_store_connect:
         api_key: $APP_STORE_CONNECT_API_KEY
