@@ -1,233 +1,33 @@
-# codemagic.yaml
 workflows:
-  ios-signing-fix:
-    name: iOS Signing Fix
+  check-current:
+    name: Check Current Settings
     environment:
       xcode: latest
-      groups:
-        - appstore_signing
-      vars:
-        TEAM_ID: "7994453ZHZ"
-        BUNDLE_ID: "com.test.ios.attaf"
-        PROFILE_NAME: "codemagic Production"
     
     scripts:
-      - name: Setup signing manually
+      - name: Show all env vars
         script: |
-          echo "=== Manual signing setup ==="
-          
-          # 清理 URL 变量中的换行符和空格
-          CERT_URL=$(echo "$APPSTORE_CERTIFICATE_URL" | tr -d '\n\r' | xargs)
-          PROFILE_URL=$(echo "$APPSTORE_PROVISIONING_PROFILE_URL" | tr -d '\n\r' | xargs)
-          CERT_PASSWORD=$(echo "$APPSTORE_CERTIFICATE_PASSWORD" | tr -d '\n\r' | xargs)
-          
-          echo "Certificate URL (cleaned): $CERT_URL"
-          echo "Profile URL (cleaned): $PROFILE_URL"
-          echo "Password length: ${#CERT_PASSWORD} chars"
-          
-          # 1. 下载描述文件
-          echo "Downloading provisioning profile..."
-          curl -L -o profile.mobileprovision "$PROFILE_URL"
-          
-          # 验证文件
-          if [ ! -f "profile.mobileprovision" ]; then
-            echo "❌ Failed to download profile"
-            echo "Trying without quotes..."
-            # 尝试不带引号
-            curl -L -o profile.mobileprovision $PROFILE_URL
-            
-            if [ ! -f "profile.mobileprovision" ]; then
-              echo "❌ Still failed to download profile"
-              echo "URL value might be incorrect"
-              echo "Testing URL..."
-              curl -I "$PROFILE_URL" || echo "URL test failed"
-              exit 1
-            fi
-          fi
-          
-          echo "Profile size: $(wc -c < profile.mobileprovision) bytes"
-          
-          # 2. 安装到正确位置
-          PROFILES_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
-          mkdir -p "$PROFILES_DIR"
-          
-          # 提取 UUID
-          UUID=$(strings profile.mobileprovision | grep -E "^[A-F0-9]{8}-([A-F0-9]{4}-){3}[A-F0-9]{12}$" | head -1)
-          
-          if [ -z "$UUID" ]; then
-            UUID="codemagic_production"
-          fi
-          
-          cp profile.mobileprovision "$PROFILES_DIR/$UUID.mobileprovision"
-          echo "✅ Profile installed as: $UUID.mobileprovision"
-          
-          # 3. 下载并安装证书
-          echo "Downloading certificate..."
-          curl -L -o certificate.p12 "$CERT_URL"
-          
-          if [ ! -f "certificate.p12" ]; then
-            echo "❌ Failed to download certificate"
-            echo "Trying without quotes..."
-            curl -L -o certificate.p12 $CERT_URL
-          fi
-          
-          if [ ! -f "certificate.p12" ]; then
-            echo "❌ Still failed to download certificate"
-            exit 1
-          fi
-          
-          echo "Certificate size: $(wc -c < certificate.p12) bytes"
-          
-          # 创建专用钥匙串
-          KEYCHAIN="ios_build.keychain"
-          KEYCHAIN_PWD="build123"
-          
-          security delete-keychain "$HOME/Library/Keychains/$KEYCHAIN" 2>/dev/null || true
-          security create-keychain -p "$KEYCHAIN_PWD" "$HOME/Library/Keychains/$KEYCHAIN"
-          security default-keychain -s "$HOME/Library/Keychains/$KEYCHAIN"
-          security unlock-keychain -p "$KEYCHAIN_PWD" "$HOME/Library/Keychains/$KEYCHAIN"
-          
-          # 导入证书
-          security import certificate.p12 \
-            -k "$HOME/Library/Keychains/$KEYCHAIN" \
-            -P "$CERT_PASSWORD" \
-            -T /usr/bin/codesign \
-            -A
-          
-          # 关键：设置钥匙串权限
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PWD" "$HOME/Library/Keychains/$KEYCHAIN"
-          
-          echo "✅ Certificate installed"
-          security find-identity -v -p codesigning "$HOME/Library/Keychains/$KEYCHAIN"
-      
-      - name: Build with manual signing
-        script: |
-          echo "=== Building with manual signing ==="
-          
-          # 清理
-          rm -rf build 2>/dev/null || true
-          mkdir -p build
-          
-          echo "Using parameters:"
-          echo "Team ID: $TEAM_ID"
-          echo "Bundle ID: $BUNDLE_ID"
-          echo "Profile: $PROFILE_NAME"
-          
-          # 构建归档 - 使用手动签名参数
-          xcodebuild archive \
-            -workspace "123.xcworkspace" \
-            -scheme "123" \
-            -configuration Release \
-            -archivePath "build/App.xcarchive" \
-            -destination 'generic/platform=iOS' \
-            -allowProvisioningUpdates \
-            DEVELOPMENT_TEAM="$TEAM_ID" \
-            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
-            CODE_SIGN_STYLE="Manual" \
-            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
-            CODE_SIGN_IDENTITY="Apple Distribution"
-          
-          # 检查结果
-          if [ -d "build/App.xcarchive" ]; then
-            echo "✅ Archive created successfully!"
+          echo "=== Current environment variables ==="
+          echo "Groups defined in YAML: appstore_signing"
+          echo ""
+          echo "Looking for APPSTORE variables..."
+          if [ -z "$APPSTORE_CERTIFICATE_URL" ]; then
+            echo "❌ APPSTORE_CERTIFICATE_URL: NOT SET"
           else
-            echo "❌ Archive failed, trying automatic signing..."
-            
-            # 尝试自动签名
-            xcodebuild archive \
-              -workspace "123.xcworkspace" \
-              -scheme "123" \
-              -configuration Release \
-              -archivePath "build/App.xcarchive" \
-              -allowProvisioningUpdates \
-              CODE_SIGN_STYLE="Automatic" \
-              DEVELOPMENT_TEAM="$TEAM_ID"
-              
-            if [ -d "build/App.xcarchive" ]; then
-              echo "✅ Archive created with automatic signing!"
-            else
-              echo "❌ Both signing methods failed"
-              exit 1
-            fi
+            echo "✅ APPSTORE_CERTIFICATE_URL: SET (length: ${#APPSTORE_CERTIFICATE_URL})"
           fi
-      
-      - name: Export IPA
-        script: |
-          echo "=== Exporting IPA ==="
           
-          # 创建 exportOptions.plist
-          cat > exportOptions.plist << EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>method</key>
-              <string>app-store</string>
-              <key>teamID</key>
-              <string>$TEAM_ID</string>
-              <key>signingStyle</key>
-              <string>manual</string>
-              <key>signingCertificate</key>
-              <string>Apple Distribution</string>
-              <key>provisioningProfiles</key>
-              <dict>
-                  <key>$BUNDLE_ID</key>
-                  <string>$PROFILE_NAME</string>
-              </dict>
-          </dict>
-          </plist>
-          EOF
-          
-          echo "Export options created"
-          
-          # 导出 IPA
-          xcodebuild -exportArchive \
-            -archivePath "build/App.xcarchive" \
-            -exportPath "build" \
-            -exportOptionsPlist "exportOptions.plist" \
-            -allowProvisioningUpdates
-          
-          # 检查结果
-          if ls build/*.ipa 1> /dev/null 2>&1; then
-            IPA_FILE=$(ls build/*.ipa | head -1)
-            echo "✅ IPA exported successfully!"
-            echo "File: $IPA_FILE"
-            echo "Size: $(du -h "$IPA_FILE" | cut -f1)"
+          if [ -z "$APPSTORE_PROVISIONING_PROFILE_URL" ]; then
+            echo "❌ APPSTORE_PROVISIONING_PROFILE_URL: NOT SET"
           else
-            echo "❌ IPA export failed"
-            echo "Trying with automatic signing..."
-            
-            # 尝试自动签名导出
-            cat > exportAuto.plist << EOF
-            <?xml version="1.0" encoding="UTF-8"?>
-            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-            <plist version="1.0">
-            <dict>
-                <key>method</key>
-                <string>app-store</string>
-                <key>teamID</key>
-                <string>$TEAM_ID</string>
-                <key>signingStyle</key>
-                <string>automatic</string>
-            </dict>
-            </plist>
-            EOF
-            
-            xcodebuild -exportArchive \
-              -archivePath "build/App.xcarchive" \
-              -exportPath "build" \
-              -exportOptionsPlist "exportAuto.plist" \
-              -allowProvisioningUpdates
-              
-            if ls build/*.ipa 1> /dev/null 2>&1; then
-              echo "✅ IPA exported with automatic signing!"
-              ls -lh build/*.ipa
-            else
-              echo "❌ All export attempts failed"
-              exit 1
-            fi
+            echo "✅ APPSTORE_PROVISIONING_PROFILE_URL: SET (length: ${#APPSTORE_PROVISIONING_PROFILE_URL})"
           fi
-    
-    artifacts:
-      - build/*.ipa
-      - exportOptions.plist
+          
+          if [ -z "$APPSTORE_CERTIFICATE_PASSWORD" ]; then
+            echo "❌ APPSTORE_CERTIFICATE_PASSWORD: NOT SET"
+          else
+            echo "✅ APPSTORE_CERTIFICATE_PASSWORD: SET (length: ${#APPSTORE_CERTIFICATE_PASSWORD})"
+          fi
+          
+          echo ""
+          echo "如果没有设置，请按照上述步骤在 Codemagic UI 中设置。"
