@@ -1,3 +1,4 @@
+# codemagic.yaml
 workflows:
   ios-hybrid:
     name: iOS Hybrid Build
@@ -7,7 +8,7 @@ workflows:
         - appstore_signing
     
     scripts:
-      - name: Step 1: Manual provisioning setup
+      - name: Step 1 Manual provisioning setup
         script: |
           echo "=== Step 1: Manual provisioning setup ==="
           
@@ -21,7 +22,7 @@ workflows:
           echo "Provisioning profile installed"
           ls -la ~/Library/MobileDevice/Provisioning\ Profiles/
       
-      - name: Step 2: Build with fastlane
+      - name: Step 2 Build with fastlane
         script: |
           echo "=== Step 2: Build with fastlane ==="
           
@@ -40,7 +41,7 @@ workflows:
           
           fastlane build
       
-      - name: Step 3: Final verification
+      - name: Step 3 Final verification
         script: |
           echo "=== Step 3: Verification ==="
           
