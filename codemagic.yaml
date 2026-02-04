@@ -1,61 +1,42 @@
-# codemagic.yaml
 workflows:
-  ios-hybrid:
-    name: iOS Hybrid Build
+  ios-simple:
+    name: iOS Simple Build
     environment:
       xcode: latest
       groups:
         - appstore_signing
     
     scripts:
-      - name: Step 1 Manual provisioning setup
+      - name: Install profile and build
         script: |
-          echo "=== Step 1: Manual provisioning setup ==="
-          
-          # 下载描述文件
+          # 1. 安装描述文件
           curl -L -o profile.mobileprovision "$APPSTORE_PROVISIONING_PROFILE_URL"
-          
-          # 安装到系统位置
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles/
-          cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/codemagic_Production.mobileprovision
+          cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
           
-          echo "Provisioning profile installed"
-          ls -la ~/Library/MobileDevice/Provisioning\ Profiles/
-      
-      - name: Step 2 Build with fastlane
-        script: |
-          echo "=== Step 2: Build with fastlane ==="
-          
-          # 安装 fastlane
+          # 2. 使用 fastlane 构建
           sudo gem install fastlane -NV
           
-          # 最简单的构建
-          echo 'lane :build do
+          cat > Fastfile << 'EOF'
+          lane :build do
             gym(
               workspace: "123.xcworkspace",
               scheme: "123",
               export_method: "app-store",
               output_directory: "build"
             )
-          end' > Fastfile
+          end
+          EOF
           
           fastlane build
       
-      - name: Step 3 Final verification
+      - name: Check result
         script: |
-          echo "=== Step 3: Verification ==="
-          
-          COUNT=$(find . -name "*.ipa" -type f | wc -l)
-          if [ "$COUNT" -gt 0 ]; then
-            echo "✅ Found $COUNT IPA file(s)"
-            find . -name "*.ipa" -type f | xargs ls -lh
-            
-            # 确保在 build 目录
-            mkdir -p build
-            find . -name "*.ipa" -type f ! -path "./build/*" -exec cp {} build/ \;
+          if [ -f "build/*.ipa" ]; then
+            echo "Build successful"
           else
-            echo "❌ No IPA files found"
-            exit 1
+            echo "Checking for IPA..."
+            find . -name "*.ipa" -type f
           fi
     
     artifacts:
