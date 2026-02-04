@@ -1,71 +1,19 @@
-# codemagic.yaml - 简化版
 workflows:
-  ios-release:
-    name: iOS Release
+  ios-simple:
+    name: iOS Simple Build
     environment:
       xcode: latest
-      groups:
-        - appstore_signing
-      vars:
-        SCHEME: "123"
-        TEAM_ID: "7994453ZHZ"
-        BUNDLE_ID: "com.test.ios.attaf"
-        PROVISIONING_PROFILE_NAME: "codemagic Production"
     
     scripts:
-      - name: Build iOS IPA
+      - name: Just test build
         script: |
-          echo "Building iOS app..."
-          
-          # 1. 清理
-          rm -rf build 2>/dev/null || true
-          mkdir -p build
-          
-          # 2. 归档
-          xcodebuild archive \
+          # 先测试能否构建（不签名）
+          xcodebuild build \
             -workspace "123.xcworkspace" \
-            -scheme "$SCHEME" \
-            -configuration Release \
-            -archivePath "build/$SCHEME.xcarchive" \
-            -destination 'generic/platform=iOS' \
-            -allowProvisioningUpdates \
-            PROVISIONING_PROFILE_SPECIFIER="$PROVISIONING_PROFILE_NAME" \
-            DEVELOPMENT_TEAM="$TEAM_ID"
+            -scheme "123" \
+            -configuration Debug \
+            -destination 'platform=iOS Simulator,name=iPhone 15' \
+            CODE_SIGNING_ALLOWED=NO
           
-          # 3. 导出
-          cat > export.plist << EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>method</key>
-              <string>app-store</string>
-              <key>teamID</key>
-              <string>$TEAM_ID</string>
-              <key>provisioningProfiles</key>
-              <dict>
-                  <key>$BUNDLE_ID</key>
-                  <string>$PROVISIONING_PROFILE_NAME</string>
-              </dict>
-          </dict>
-          </plist>
-          EOF
-          
-          xcodebuild -exportArchive \
-            -archivePath "build/$SCHEME.xcarchive" \
-            -exportPath "build" \
-            -exportOptionsPlist "export.plist" \
-            -allowProvisioningUpdates
-          
-          echo "Build completed!"
-          ls -lh build/*.ipa
-    
-    artifacts:
-      - build/*.ipa
-    
-    publishing:
-      app_store_connect:
-        api_key: $APP_STORE_CONNECT_API_KEY
-        key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
-        issuer_id: $APP_STORE_CONNECT_ISSUER_ID
-        submit_to_testflight: true
+          echo "If this works, the project structure is OK"
+          echo "The issue is with code signing configuration"
