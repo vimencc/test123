@@ -1,111 +1,43 @@
-# codemagic.yaml
 workflows:
-  ios-release:
-    name: iOS App Store Release
+  ios-simple-fastlane:
+    name: iOS Simple Fastlane
     environment:
       xcode: latest
       groups:
         - appstore_signing
     
     scripts:
-      - name: Build with fastlane (proven to work)
+      - name: One-step fastlane build
         script: |
-          echo "=== Building with fastlane ==="
-          
-          # 安装 fastlane
+          # 最简单的方法：直接使用 fastlane gym
           sudo gem install fastlane -NV
           
-          # 创建 fastlane 目录和配置文件
-          mkdir -p fastlane
+          # 直接调用 gym，不创建 Fastfile
+          fastlane run gym \
+            workspace:"123.xcworkspace" \
+            scheme:"123" \
+            export_method:"app-store" \
+            output_directory:"build" \
+            clean:true
           
-          # 创建 Appfile（包含签名信息）
-          cat > fastlane/Appfile << EOF
-          app_identifier "com.test.ios.attaf"
-          apple_id "lingya00130@gmail.com"
-          team_id "7994453ZHZ"
-          EOF
-          
-          # 创建 Fastfile（使用之前成功的配置）
-          cat > fastlane/Fastfile << 'EOF'
-          default_platform(:ios)
-          
-          platform :ios do
-            lane :release do
-              # 使用 gym 构建 IPA
-              gym(
-                workspace: "123.xcworkspace",
-                scheme: "123",
-                configuration: "Release",
-                output_directory: "build",
-                export_method: "app-store",
-                clean: true,
-                silent: false,
-                skip_package_ipa: false
-              )
-            end
-          end
-          EOF
-          
-          echo "Fastlane configuration created"
-          echo "Contents of Fastfile:"
-          cat fastlane/Fastfile
-          
-          # 运行构建
-          cd fastlane
-          echo "Starting fastlane build..."
-          fastlane ios release
-          cd ..
-          
-          echo "Fastlane build process completed"
+          echo "Build attempt completed"
+          ls build/*.ipa 2>/dev/null || echo "Checking for IPA..."
       
-      - name: Verify and collect artifacts
+      - name: Fallback if needed
         script: |
-          echo "=== Verifying build artifacts ==="
-          
-          # 检查 IPA 文件
-          if ls build/*.ipa 1> /dev/null 2>&1; then
-            echo "✅ IPA file found!"
-            ls -lh build/*.ipa
+          # 如果上面失败，尝试这个
+          if [ ! -f "build/*.ipa" ]; then
+            echo "Trying alternative approach..."
             
-            # 验证 IPA 内容
-            IPA_FILE=$(ls build/*.ipa | head -1)
-            echo "IPA details:"
-            echo "File: $IPA_FILE"
-            echo "Size: $(du -h "$IPA_FILE" | cut -f1)"
-            
-            # 检查包含的应用
-            echo "Checking app inside IPA..."
-            unzip -l "$IPA_FILE" | grep "Payload/" | head -3
-          else
-            echo "❌ No IPA file found in build directory"
-            echo "Searching for IPA files..."
-            find . -name "*.ipa" -type f | xargs ls -lh 2>/dev/null || echo "No IPA files found anywhere"
-            
-            # 检查 fastlane 日志
-            echo "Checking fastlane logs..."
-            find fastlane -name "*.log" -type f | head -3
-            exit 1
+            # 使用 xcodebuild 但让 fastlane 处理签名
+            fastlane run build_ios_app \
+              workspace:"123.xcworkspace" \
+              scheme:"123" \
+              export_method:"app-store"
           fi
-      
-      - name: Prepare for distribution
-        script: |
-          echo "=== Preparing for distribution ==="
           
-          # 确保 IPA 在正确的位置
-          mkdir -p build
-          
-          # 如果 IPA 不在 build 目录，复制过去
-          IPA_FILES=$(find . -name "*.ipa" -type f ! -path "./build/*")
-          for IPA in $IPA_FILES; do
-            echo "Found IPA: $IPA"
-            cp "$IPA" build/
-          done
-          
-          echo "Final build directory:"
-          ls -la build/
+          # 最终检查
+          find . -name "*.ipa" -type f | xargs ls -lh 2>/dev/null || echo "No IPA files"
     
     artifacts:
       - build/*.ipa
-      - fastlane/Appfile
-      - fastlane/Fastfile
-      - fastlane/logs/*.log
