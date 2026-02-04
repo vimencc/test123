@@ -1,7 +1,7 @@
 # codemagic.yaml
 workflows:
   ios-release:
-    name: iOS Release
+    name: iOS App Store Release
     environment:
       xcode: latest
       groups:
@@ -14,71 +14,93 @@ workflows:
     scripts:
       - name: Prepare environment
         script: |
-          echo "Building iOS app..."
+          echo "=== Starting iOS Build ==="
+          echo "Working directory: $(pwd)"
           echo "Scheme: $SCHEME"
           echo "Team ID: $TEAM_ID"
-          echo "Bundle ID: $BUNDLE_ID"
+          echo "Files in current directory:"
+          ls -la
           
           # 创建构建目录
           mkdir -p build
       
-      - name: Install CocoaPods dependencies
+      - name: Install dependencies
         script: |
-          if [ -f "ios/Podfile" ]; then
-            echo "Installing CocoaPods dependencies..."
-            cd ios
+          echo "Installing dependencies..."
+          
+          # 检查是否需要安装 CocoaPods
+          if [ -f "Podfile" ]; then
+            echo "Found Podfile, installing pods..."
             pod install --repo-update
-            cd ..
           else
-            echo "No Podfile found, skipping pod install"
+            echo "No Podfile found, checking iOS directory..."
+            if [ -f "ios/Podfile" ]; then
+              cd ios
+              pod install --repo-update
+              cd ..
+            else
+              echo "No Podfile found anywhere, skipping pod install"
+            fi
           fi
       
       - name: Archive the app
         script: |
-          echo "Archiving the app..."
+          echo "=== Archiving the app ==="
           
-          cd ios
-          
-          # 检查是使用 workspace 还是 project
-          if [ -f "$SCHEME.xcworkspace" ]; then
-            echo "Using workspace: $SCHEME.xcworkspace"
+          # 检查使用 workspace 还是 project
+          if [ -d "123.xcworkspace" ]; then
+            echo "Using workspace: 123.xcworkspace"
+            
+            # 列出所有可用的 schemes
+            echo "Available schemes in workspace:"
+            xcodebuild -workspace "123.xcworkspace" -list
+            
             ARCHIVE_CMD="xcodebuild archive \
-              -workspace \"$SCHEME.xcworkspace\" \
-              -scheme \"$SCHEME\" \
+              -workspace \"123.xcworkspace\" \
+              -scheme \"123\" \
               -configuration Release \
-              -archivePath \"../build/$SCHEME.xcarchive\" \
+              -archivePath \"build/123.xcarchive\" \
               -destination 'generic/platform=iOS' \
               -allowProvisioningUpdates"
-          elif [ -f "$SCHEME.xcodeproj" ]; then
-            echo "Using project: $SCHEME.xcodeproj"
+          elif [ -d "123.xcodeproj" ]; then
+            echo "Using project: 123.xcodeproj"
+            
+            # 列出所有可用的 schemes
+            echo "Available schemes in project:"
+            xcodebuild -project "123.xcodeproj" -list
+            
             ARCHIVE_CMD="xcodebuild archive \
-              -project \"$SCHEME.xcodeproj\" \
-              -scheme \"$SCHEME\" \
+              -project \"123.xcodeproj\" \
+              -scheme \"123\" \
               -configuration Release \
-              -archivePath \"../build/$SCHEME.xcarchive\" \
+              -archivePath \"build/123.xcarchive\" \
               -destination 'generic/platform=iOS' \
               -allowProvisioningUpdates"
           else
-            echo "Error: No .xcworkspace or .xcodeproj found for scheme: $SCHEME"
-            ls -la
+            echo "ERROR: No Xcode project files found!"
+            echo "Looking for files:"
+            find . -name "*.xcworkspace" -o -name "*.xcodeproj" | head -10
             exit 1
           fi
           
-          echo "Executing: $ARCHIVE_CMD"
+          echo "Executing archive command..."
           eval $ARCHIVE_CMD
           
           # 检查归档是否成功
-          if [ -d "../build/$SCHEME.xcarchive" ]; then
-            echo "✅ Archive created successfully at: ../build/$SCHEME.xcarchive"
-            ls -la "../build/"
+          if [ -d "build/123.xcarchive" ]; then
+            echo "✅ Archive created successfully!"
+            echo "Archive size:"
+            du -sh build/123.xcarchive
           else
             echo "❌ Archive creation failed!"
+            echo "Contents of build directory:"
+            ls -la build/
             exit 1
           fi
       
       - name: Create export options
         script: |
-          echo "Creating export options..."
+          echo "Creating exportOptions.plist..."
           
           cat > exportOptions.plist << EOF
           <?xml version="1.0" encoding="UTF-8"?>
@@ -89,16 +111,19 @@ workflows:
               <string>app-store</string>
               <key>teamID</key>
               <string>$TEAM_ID</string>
+              <key>signingStyle</key>
+              <string>manual</string>
               <key>uploadBitcode</key>
               <false/>
               <key>compileBitcode</key>
               <false/>
               <key>uploadSymbols</key>
               <true/>
-              <key>signingStyle</key>
-              <string>manual</string>
-              <key>signingCertificate</key>
-              <string>Apple Distribution</string>
+              <key>provisioningProfiles</key>
+              <dict>
+                  <key>$BUNDLE_ID</key>
+                  <string>$BUNDLE_ID</string>
+              </dict>
           </dict>
           </plist>
           EOF
@@ -108,10 +133,10 @@ workflows:
       
       - name: Export IPA
         script: |
-          echo "Exporting IPA..."
+          echo "=== Exporting IPA ==="
           
           EXPORT_CMD="xcodebuild -exportArchive \
-            -archivePath \"build/$SCHEME.xcarchive\" \
+            -archivePath \"build/123.xcarchive\" \
             -exportPath \"build\" \
             -exportOptionsPlist \"exportOptions.plist\" \
             -allowProvisioningUpdates"
@@ -122,19 +147,39 @@ workflows:
           # 检查 IPA 是否生成
           if ls build/*.ipa 1> /dev/null 2>&1; then
             echo "✅ IPA exported successfully!"
-            echo "Generated files:"
-            ls -la build/*.ipa
+            echo "Generated IPA files:"
+            ls -lh build/*.ipa
           else
             echo "❌ IPA export failed!"
-            echo "Contents of build directory:"
+            echo "Checking build directory:"
             ls -la build/
+            echo "Checking for errors in logs..."
+            find build -name "*.log" -exec tail -50 {} \;
             exit 1
+          fi
+      
+      - name: Verify build
+        script: |
+          echo "=== Verifying build ==="
+          
+          # 检查 IPA 文件
+          IPA_FILE=$(ls build/*.ipa | head -1)
+          if [ -f "$IPA_FILE" ]; then
+            echo "IPA file: $IPA_FILE"
+            echo "File size: $(du -h "$IPA_FILE" | cut -f1)"
+            
+            # 检查内容
+            echo "IPA contents:"
+            unzip -l "$IPA_FILE" | grep "Payload/" | head -5
+          else
+            echo "No IPA file found!"
           fi
     
     artifacts:
       - build/*.ipa
       - build/*.xcarchive
       - exportOptions.plist
+      - Podfile.lock
     
     publishing:
       app_store_connect:
