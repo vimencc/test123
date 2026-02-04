@@ -1,50 +1,106 @@
+# codemagic.yaml
 workflows:
   ios-release:
-    name: iOS Release
+    name: iOS App Store Release
     environment:
       xcode: latest
       groups:
         - appstore_signing
     
     scripts:
-      - name: Build iOS
+      - name: Build iOS app
         script: |
-          # 安装 fastlane
-          sudo gem install fastlane -NV
+          echo "=== Building iOS app ==="
           
-          # 创建正确的 fastlane 配置
-          mkdir -p fastlane
+          # 方法 1: 直接使用 xcodebuild（处理空格）
+          echo "Method 1: Using xcodebuild directly"
           
-          # 创建 Fastfile - 注意：使用 default_platform
-          cat > fastlane/Fastfile << 'EOF'
-          default_platform(:ios)
+          # 清理
+          rm -rf build 2>/dev/null || true
+          mkdir -p build
           
-          platform :ios do
-            lane :build do
-              gym(
-                workspace: "123.xcworkspace",
-                scheme: "123",
-                export_method: "app-store",
-                output_directory: "build"
-              )
-            end
-          end
+          # **关键：处理可能的空格问题**
+          # 尝试不同的 scheme 格式
+          SCHEME_ATTEMPTS=("123" "\"123 \"" "'123 '" "123\\ ")
+          
+          for SCHEME in "${SCHEME_ATTEMPTS[@]}"; do
+            echo "Trying scheme: $SCHEME"
+            
+            # 测试是否能列出 scheme
+            if xcodebuild -workspace "123.xcworkspace" -list 2>&1 | grep -q "123"; then
+              echo "Scheme found, attempting archive..."
+              
+              # 尝试归档
+              if xcodebuild archive \
+                -workspace "123.xcworkspace" \
+                -scheme "123" \
+                -configuration Release \
+                -archivePath "build/123.xcarchive" \
+                -destination 'generic/platform=iOS' \
+                -allowProvisioningUpdates 2>&1 | tee build.log; then
+                
+                echo "✅ Archive successful!"
+                break
+              else
+                echo "❌ Archive failed with scheme: $SCHEME"
+                tail -20 build.log
+              fi
+            fi
+          done
+          
+          # 检查归档是否成功
+          if [ -d "build/123.xcarchive" ]; then
+            echo "Archive created successfully"
+          else
+            echo "Trying alternative approach..."
+            
+            # 方法 2: 使用 xcodebuild 不带引号
+            xcodebuild archive \
+              -workspace 123.xcworkspace \
+              -scheme 123 \
+              -configuration Release \
+              -archivePath build/123.xcarchive \
+              -allowProvisioningUpdates
+          fi
+      
+      - name: Export IPA
+        script: |
+          echo "=== Exporting IPA ==="
+          
+          # 创建 exportOptions.plist
+          cat > exportOptions.plist << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>app-store</string>
+              <key>teamID</key>
+              <string>7994453ZHZ</string>
+              <key>uploadBitcode</key>
+              <false/>
+              <key>compileBitcode</key>
+              <false/>
+          </dict>
+          </plist>
           EOF
           
-          # 运行正确的 lane
-          cd fastlane
-          fastlane build  # 注意：是 fastlane build，不是 fastlane ios build
-      
-      - name: Check build result
-        script: |
+          # 导出 IPA
+          xcodebuild -exportArchive \
+            -archivePath "build/123.xcarchive" \
+            -exportPath "build" \
+            -exportOptionsPlist "exportOptions.plist" \
+            -allowProvisioningUpdates
+          
+          # 检查结果
           if ls build/*.ipa 1> /dev/null 2>&1; then
-            echo "✅ Build successful!"
+            echo "✅ IPA exported successfully!"
             ls -lh build/*.ipa
           else
-            echo "❌ Build failed - checking for errors"
-            find . -name "*.log" -type f | xargs tail -100 2>/dev/null || true
+            echo "❌ IPA export failed"
             exit 1
           fi
     
     artifacts:
       - build/*.ipa
+      - exportOptions.plist
