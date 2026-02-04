@@ -1,62 +1,31 @@
-# 更简化的版本，移除缓存
 workflows:
   ios-release:
-    name: iOS App Store Release
+    name: iOS Release
     environment:
       xcode: latest
       groups:
         - appstore_signing
-        - appstore_connect
-      vars:
-        APP_IDENTIFIER: "com.test.ios.attaf"
-        TEAM_ID: "7994453ZHZ"
-        SCHEME: "123"
     
     scripts:
-      - name: Build with fastlane
+      - name: Build iOS
         script: |
-          # 安装 fastlane
+          # 最简单的构建
           sudo gem install fastlane -NV
           
-          # 创建 fastlane 配置
           mkdir -p fastlane
-          
-          cat > fastlane/Fastfile << EOF
-          default_platform(:ios)
-          
-          platform :ios do
-            lane :release do
-              gym(
-                workspace: "123.xcworkspace",
-                scheme: "123",
-                export_method: "app-store",
-                output_directory: "build",
-                clean: true
-              )
-            end
+          cat > fastlane/Fastfile << 'EOF'
+          lane :build do
+            gym(
+              workspace: "123.xcworkspace",
+              scheme: "123",
+              export_method: "app-store",
+              output_directory: "build"
+            )
           end
           EOF
           
-          # 运行构建
           cd fastlane
-          fastlane ios release
-      
-      - name: Check build
-        script: |
-          if ls build/*.ipa 1> /dev/null 2>&1; then
-            echo "✅ Build successful!"
-            ls -lh build/*.ipa
-          else
-            echo "❌ Build failed"
-            exit 1
-          fi
+          fastlane ios build
     
     artifacts:
       - build/*.ipa
-    
-    publishing:
-      app_store_connect:
-        api_key: $APP_STORE_CONNECT_API_KEY
-        key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
-        issuer_id: $APP_STORE_CONNECT_ISSUER_ID
-        submit_to_testflight: true
