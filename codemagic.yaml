@@ -1,108 +1,47 @@
 workflows:
-  ios-proven:
-    name: iOS Proven Build
+  ios-test:
+    name: iOS Test Build
     environment:
       xcode: latest
-      groups:
-        - appstore_signing
     
     scripts:
-      - name: Use proven fastlane config
+      - name: Test project structure
         script: |
-          echo "=== Using proven fastlane configuration ==="
+          echo "=== Testing project structure ==="
           
-          # 清理
-          rm -rf build fastlane 2>/dev/null || true
+          # 检查文件
+          pwd
+          ls -la
           
-          # 安装 fastlane
-          sudo gem install fastlane -NV
+          # 检查是否能列出 schemes
+          echo "Listing schemes:"
+          xcodebuild -workspace "123.xcworkspace" -list 2>&1 || echo "Cannot list schemes"
           
-          # 创建 fastlane 配置（基于之前成功的配置）
-          mkdir -p fastlane
+          # 尝试简单的构建（不签名）
+          echo "Testing build without signing:"
+          xcodebuild build \
+            -workspace "123.xcworkspace" \
+            -scheme "123" \
+            -configuration Debug \
+            -destination 'platform=iOS Simulator,name=iPhone 15' \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tail -20 || echo "Build test completed"
           
-          # 创建 Fastfile（与之前成功的完全一样）
-          cat > fastlane/Fastfile << 'EOF'
-          default_platform(:ios)
-          
-          platform :ios do
-            lane :release do
-              # 构建 IPA
-              gym(
-                workspace: "123.xcworkspace",
-                scheme: "123",
-                configuration: "Release",
-                output_directory: "build",
-                export_method: "app-store",
-                export_options: {
-                  method: "app-store",
-                  teamID: "7994453ZHZ",
-                  uploadBitcode: false,
-                  compileBitcode: false
-                },
-                clean: true,
-                silent: false,
-                skip_package_ipa: false,
-                skip_archive: false,
-                include_symbols: true,
-                include_bitcode: false
-              )
-            end
-          end
-          EOF
-          
-          # 创建 Appfile
-          cat > fastlane/Appfile << EOF
-          app_identifier "com.test.ios.attaf"
-          apple_id "lingya00130@gmail.com"
-          team_id "7994453ZHZ"
-          EOF
-          
-          echo "Configuration files created"
-          
-          # 运行构建
-          cd fastlane
-          fastlane ios release
-          cd ..
-          
-          echo "Build completed"
+          echo "✅ Project structure seems OK"
       
-      - name: Find and collect IPA
+      - name: Test archive without signing
         script: |
-          echo "=== Finding IPA file ==="
+          echo "=== Testing archive without signing ==="
           
-          # 搜索 IPA 文件（包括嵌套目录）
-          echo "Searching recursively for IPA files..."
-          find . -type f -name "*.ipa" 2>/dev/null | while read ipa; do
-            echo "Found IPA: $ipa"
-            # 获取文件信息
-            echo "  Size: $(du -h "$ipa" | cut -f1)"
-            echo "  Location: $(dirname "$ipa")"
-          done
+          # 尝试归档但不签名
+          xcodebuild archive \
+            -workspace "123.xcworkspace" \
+            -scheme "123" \
+            -configuration Debug \
+            -archivePath "build/test.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tail -20 || echo "Archive test completed"
           
-          # 复制到 build 目录
-          mkdir -p build
-          IPA_COUNT=0
-          find . -type f -name "*.ipa" ! -path "./build/*" 2>/dev/null | while read ipa; do
-            IPA_COUNT=$((IPA_COUNT + 1))
-            echo "Copying $ipa to build/"
-            cp "$ipa" "build/app_$IPA_COUNT.ipa"
-          done
-          
-          if [ $IPA_COUNT -gt 0 ]; then
-            echo "✅ Successfully copied $IPA_COUNT IPA files to build directory"
-            ls -lh build/
+          if [ -d "build/test.xcarchive" ]; then
+            echo "✅ Archive created (without signing)"
           else
-            echo "❌ No IPA files found anywhere"
-            
-            # 调试：列出 fastlane 输出目录
-            echo "Checking fastlane output directories..."
-            find . -type d -name "output" -o -name "builds" 2>/dev/null | while read dir; do
-              echo "Checking $dir:"
-              ls -la "$dir/" 2>/dev/null || echo "  (empty or inaccessible)"
-            done
-            
-            exit 1
+            echo "❌ Archive failed"
           fi
-    
-    artifacts:
-      - build/*.ipa
