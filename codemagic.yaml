@@ -1,4 +1,4 @@
-# codemagic.yaml - 简化版
+# codemagic.yaml - 最简版本
 workflows:
   ios-release:
     name: iOS Release
@@ -9,36 +9,37 @@ workflows:
       vars:
         BUNDLE_ID: "com.test.ios.attaf"
         SCHEME: "123"
-        TEAM_ID: "7994453ZHZ"  # 获取方法见下文
+        TEAM_ID: "7994453ZHZ"
     
-    # 如果您的项目在 ios 目录下
-    ios:
-      project: "ios/123.xcodeproj"  # 或 "ios/123.xcworkspace"
-      scheme: "$SCHEME"
-    
+    # 完全不使用 ios 字段，全部在 scripts 中处理
     scripts:
       - name: Build iOS app
         script: |
-          cd ios
+          echo "Building iOS app..."
           
-          # 自动检测使用 workspace 还是 project
-          if [ -f "$SCHEME.xcworkspace" ]; then
-            echo "Building with workspace: $SCHEME.xcworkspace"
-            xcode-project build-ipa \
-              --workspace "$SCHEME.xcworkspace" \
-              --scheme "$SCHEME" \
-              --export-options-plist "exportOptions.plist"
-          else
-            echo "Building with project: $SCHEME.xcodeproj"
-            xcode-project build-ipa \
-              --project "$SCHEME.xcodeproj" \
-              --scheme "$SCHEME" \
-              --export-options-plist "exportOptions.plist"
-          fi
+          # 创建 exportOptions.plist
+          cat > exportOptions.plist << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>app-store</string>
+              <key>teamID</key>
+              <string>$TEAM_ID</string>
+          </dict>
+          </plist>
+          EOF
+          
+          # 使用 xcodebuild 直接构建
+          xcodebuild -exportArchive \
+            -archivePath "build/123.xcarchive" \
+            -exportPath "build" \
+            -exportOptionsPlist "exportOptions.plist"
     
     artifacts:
-      - build/ios/ipa/*.ipa
-      - build/ios/archive/*.xcarchive
+      - build/*.ipa
+      - exportOptions.plist
     
     publishing:
       app_store_connect:
