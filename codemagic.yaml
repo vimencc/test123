@@ -1,60 +1,56 @@
-
 workflows:
-  ios-native-workflow:
-    name: iOS Native
-    max_build_duration: 120
-    instance_type: mac_mini_m2
-    integrations:
-      app_store_connect: codemagic
+  appstore-release:
+    name: iOS App Store Release
     environment:
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: com.test.ios.attaf
-      vars:
-        BUNDLE_ID: "com.test.ios.attaf"
-        XCODE_WORKSPACE: "123.xcworkspace" # <-- Put the name of your Xcode workspace here
-        XCODE_SCHEME: "123" # <-- Put the name of your Xcode scheme here
-        APP_STORE_APPLE_ID: 6474600898
       xcode: latest
-      cocoapods: default
+      groups:
+        - appstore_signing  # 生产证书组
+      vars:
+        BUNDLE_ID: "com.yourcompany.app"  # 替换为您的 Bundle ID
+        SCHEME: "YourApp"  # 替换为您的 Scheme
+    
+    # iOS 自动代码签名配置 - 使用生产证书
+    ios:
+      signing:
+        certificate_url: $APPSTORE_CERTIFICATE_URL
+        certificate_password: $APPSTORE_CERTIFICATE_PASSWORD
+        provisioning_profile_url: $APPSTORE_PROVISIONING_PROFILE_URL
+    
+    # 构建脚本
     scripts:
-      - name: Install CocoaPods dependencies
-        script: | 
-          pod install
-      - name: Set up provisioning profiles settings on Xcode project
-        script: xcode-project use-profiles
-      - name: Increment build number
-        script: | 
-          cd $CM_BUILD_DIR
-          LATEST_BUILD_NUMBER=$(app-store-connect get-latest-app-store-build-number "$APP_STORE_APPLE_ID")
-          agvtool new-version -all $(($LATEST_BUILD_NUMBER + 1))
-      - name: Build ipa for distribution
-        script: | 
-          xcode-project build-ipa \
-            --workspace "$CM_BUILD_DIR/$XCODE_WORKSPACE" \
-            --scheme "$XCODE_SCHEME"
+      - name: Build for App Store
+        script: |
+          # 设置版本号
+          if [ ! -z "$BUILD_NUMBER" ]; then
+            agvtool new-version -all $BUILD_NUMBER
+          fi
+          
+          # 安装依赖
+          pod install --repo-update
+          
+          # 构建归档
+          xcodebuild archive \
+            -workspace "YourApp.xcworkspace" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -archivePath "build/YourApp.xcarchive" \
+            -destination 'generic/platform=iOS'
+          
+          # 导出 IPA
+          xcodebuild -exportArchive \
+            -archivePath "build/YourApp.xcarchive" \
+            -exportPath "build" \
+            -exportOptionsPlist "exportOptions.plist"
+    
+    # 产物
     artifacts:
-      - build/ios/ipa/*.ipa
-      - /tmp/xcodebuild_logs/*.log
-      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.app
-      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.dSYM
+      - build/*.ipa
+      - build/*.dSYM.zip
+    
+    # 发布到 App Store Connect
     publishing:
-      email:
-        recipients:
-          - vimen0830.chen@gmail.com
-        notify:
-          success: true
-          failure: false
       app_store_connect:
-        auth: integration
-
-        # Configuration related to TestFlight (optional)
-        # Note: This action is performed during post-processing.
+        api_key: $APP_STORE_CONNECT_API_KEY
+        key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
+        issuer_id: $APP_STORE_CONNECT_ISSUER_ID
         submit_to_testflight: true
-        beta_groups: # Specify the names of beta tester groups that will get access to the build once it has passed beta review.
-          - group name 1
-          - group name 2
-
-        # Configuration related to App Store (optional)
-        # Note: This action is performed during post-processing.
-        submit_to_app_store: false
