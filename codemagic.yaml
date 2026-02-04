@@ -1,42 +1,71 @@
 workflows:
-  ios-simple:
-    name: iOS Simple Build
+  ios-final:
+    name: iOS Final Build
     environment:
       xcode: latest
       groups:
         - appstore_signing
     
     scripts:
-      - name: Install profile and build
+      - name: Build process
         script: |
-          # 1. 安装描述文件
-          curl -L -o profile.mobileprovision "$APPSTORE_PROVISIONING_PROFILE_URL"
-          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles/
-          cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
+          # 使用之前已验证能工作的 fastlane 方法
           
-          # 2. 使用 fastlane 构建
+          # 1. 安装 fastlane
           sudo gem install fastlane -NV
           
-          cat > Fastfile << 'EOF'
-          lane :build do
-            gym(
-              workspace: "123.xcworkspace",
-              scheme: "123",
-              export_method: "app-store",
-              output_directory: "build"
-            )
+          # 2. 创建 fastlane 目录结构
+          mkdir -p fastlane
+          
+          # 3. 创建完整的 Fastfile（基于之前成功的配置）
+          cat > fastlane/Fastfile << 'EOF'
+          default_platform(:ios)
+          
+          platform :ios do
+            lane :release do
+              gym(
+                workspace: "123.xcworkspace",
+                scheme: "123",
+                configuration: "Release",
+                output_directory: "build",
+                export_method: "app-store",
+                clean: true,
+                silent: false,
+                skip_package_ipa: false
+              )
+            end
           end
           EOF
           
-          fastlane build
+          # 4. 进入 fastlane 目录运行
+          cd fastlane
+          
+          # 5. 运行构建（使用正确的语法）
+          fastlane ios release
+          
+          cd ..
+          
+          echo "Build finished"
       
-      - name: Check result
+      - name: Collect results
         script: |
+          # 检查结果
           if [ -f "build/*.ipa" ]; then
-            echo "Build successful"
+            echo "✅ Build successful"
           else
-            echo "Checking for IPA..."
-            find . -name "*.ipa" -type f
+            # 查找任何 IPA 文件
+            IPA_FILES=$(find . -name "*.ipa" -type f)
+            if [ -n "$IPA_FILES" ]; then
+              echo "Found IPA files elsewhere:"
+              echo "$IPA_FILES"
+              
+              # 复制到 build 目录
+              mkdir -p build
+              echo "$IPA_FILES" | xargs -I {} cp {} build/
+            else
+              echo "❌ No IPA files found"
+              exit 1
+            fi
           fi
     
     artifacts:
