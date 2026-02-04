@@ -1,33 +1,71 @@
+# codemagic.yaml - 自动签名方案
 workflows:
-  check-current:
-    name: Check Current Settings
+  ios-auto-sign:
+    name: iOS Auto Signing
     environment:
       xcode: latest
+      # 只需要 Apple ID 密码，不需要证书文件
+      vars:
+        APPLE_ID: "lingya00130@gmail.com"
+        APPLE_ID_PASSWORD: "Lingya00"  # 在 Codemagic 中设置
     
     scripts:
-      - name: Show all env vars
+      - name: Build with automatic signing
         script: |
-          echo "=== Current environment variables ==="
-          echo "Groups defined in YAML: appstore_signing"
-          echo ""
-          echo "Looking for APPSTORE variables..."
-          if [ -z "$APPSTORE_CERTIFICATE_URL" ]; then
-            echo "❌ APPSTORE_CERTIFICATE_URL: NOT SET"
-          else
-            echo "✅ APPSTORE_CERTIFICATE_URL: SET (length: ${#APPSTORE_CERTIFICATE_URL})"
-          fi
+          echo "=== 使用自动签名构建 ==="
           
-          if [ -z "$APPSTORE_PROVISIONING_PROFILE_URL" ]; then
-            echo "❌ APPSTORE_PROVISIONING_PROFILE_URL: NOT SET"
-          else
-            echo "✅ APPSTORE_PROVISIONING_PROFILE_URL: SET (length: ${#APPSTORE_PROVISIONING_PROFILE_URL})"
-          fi
+          # 清理
+          rm -rf build 2>/dev/null || true
+          mkdir -p build
           
-          if [ -z "$APPSTORE_CERTIFICATE_PASSWORD" ]; then
-            echo "❌ APPSTORE_CERTIFICATE_PASSWORD: NOT SET"
-          else
-            echo "✅ APPSTORE_CERTIFICATE_PASSWORD: SET (length: ${#APPSTORE_CERTIFICATE_PASSWORD})"
-          fi
+          echo "让 Xcode 自动处理签名..."
           
-          echo ""
-          echo "如果没有设置，请按照上述步骤在 Codemagic UI 中设置。"
+          # 使用自动签名
+          xcodebuild archive \
+            -workspace "123.xcworkspace" \
+            -scheme "123" \
+            -configuration Release \
+            -archivePath "build/App.xcarchive" \
+            -destination 'generic/platform=iOS' \
+            -allowProvisioningUpdates \
+            CODE_SIGN_STYLE="Automatic"
+          
+          # 检查归档
+          if [ -d "build/App.xcarchive" ]; then
+            echo "✅ 归档创建成功！"
+          else
+            echo "❌ 归档失败"
+            exit 1
+          fi
+      
+      - name: Export IPA
+        script: |
+          echo "=== 导出 IPA ==="
+          
+          # 导出
+          xcodebuild -exportArchive \
+            -archivePath "build/App.xcarchive" \
+            -exportPath "build" \
+            -exportOptionsPlist <(cat << 'EOF'
+          <?xml version="1.0"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store</string>
+          </dict>
+          </plist>
+          EOF
+          ) \
+            -allowProvisioningUpdates
+          
+          if ls build/*.ipa 1> /dev/null 2>&1; then
+            echo "✅ IPA 导出成功！"
+            ls -lh build/*.ipa
+          else
+            echo "❌ IPA 导出失败"
+            exit 1
+          fi
+    
+    artifacts:
+      - build/*.ipa
