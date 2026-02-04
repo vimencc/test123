@@ -1,71 +1,107 @@
 workflows:
-  ios-final:
-    name: iOS Final Build
+  ios-proven:
+    name: iOS Proven Build
     environment:
       xcode: latest
       groups:
         - appstore_signing
     
     scripts:
-      - name: Build process
+      - name: Use proven fastlane config
         script: |
-          # 使用之前已验证能工作的 fastlane 方法
+          echo "=== Using proven fastlane configuration ==="
           
-          # 1. 安装 fastlane
+          # 清理
+          rm -rf build fastlane 2>/dev/null || true
+          
+          # 安装 fastlane
           sudo gem install fastlane -NV
           
-          # 2. 创建 fastlane 目录结构
+          # 创建 fastlane 配置（基于之前成功的配置）
           mkdir -p fastlane
           
-          # 3. 创建完整的 Fastfile（基于之前成功的配置）
+          # 创建 Fastfile（与之前成功的完全一样）
           cat > fastlane/Fastfile << 'EOF'
           default_platform(:ios)
           
           platform :ios do
             lane :release do
+              # 构建 IPA
               gym(
                 workspace: "123.xcworkspace",
                 scheme: "123",
                 configuration: "Release",
                 output_directory: "build",
                 export_method: "app-store",
+                export_options: {
+                  method: "app-store",
+                  teamID: "7994453ZHZ",
+                  uploadBitcode: false,
+                  compileBitcode: false
+                },
                 clean: true,
                 silent: false,
-                skip_package_ipa: false
+                skip_package_ipa: false,
+                skip_archive: false,
+                include_symbols: true,
+                include_bitcode: false
               )
             end
           end
           EOF
           
-          # 4. 进入 fastlane 目录运行
+          # 创建 Appfile
+          cat > fastlane/Appfile << EOF
+          app_identifier "com.test.ios.attaf"
+          apple_id "lingya00130@gmail.com"
+          team_id "7994453ZHZ"
+          EOF
+          
+          echo "Configuration files created"
+          
+          # 运行构建
           cd fastlane
-          
-          # 5. 运行构建（使用正确的语法）
           fastlane ios release
-          
           cd ..
           
-          echo "Build finished"
+          echo "Build completed"
       
-      - name: Collect results
+      - name: Find and collect IPA
         script: |
-          # 检查结果
-          if [ -f "build/*.ipa" ]; then
-            echo "✅ Build successful"
+          echo "=== Finding IPA file ==="
+          
+          # 搜索 IPA 文件（包括嵌套目录）
+          echo "Searching recursively for IPA files..."
+          find . -type f -name "*.ipa" 2>/dev/null | while read ipa; do
+            echo "Found IPA: $ipa"
+            # 获取文件信息
+            echo "  Size: $(du -h "$ipa" | cut -f1)"
+            echo "  Location: $(dirname "$ipa")"
+          done
+          
+          # 复制到 build 目录
+          mkdir -p build
+          IPA_COUNT=0
+          find . -type f -name "*.ipa" ! -path "./build/*" 2>/dev/null | while read ipa; do
+            IPA_COUNT=$((IPA_COUNT + 1))
+            echo "Copying $ipa to build/"
+            cp "$ipa" "build/app_$IPA_COUNT.ipa"
+          done
+          
+          if [ $IPA_COUNT -gt 0 ]; then
+            echo "✅ Successfully copied $IPA_COUNT IPA files to build directory"
+            ls -lh build/
           else
-            # 查找任何 IPA 文件
-            IPA_FILES=$(find . -name "*.ipa" -type f)
-            if [ -n "$IPA_FILES" ]; then
-              echo "Found IPA files elsewhere:"
-              echo "$IPA_FILES"
-              
-              # 复制到 build 目录
-              mkdir -p build
-              echo "$IPA_FILES" | xargs -I {} cp {} build/
-            else
-              echo "❌ No IPA files found"
-              exit 1
-            fi
+            echo "❌ No IPA files found anywhere"
+            
+            # 调试：列出 fastlane 输出目录
+            echo "Checking fastlane output directories..."
+            find . -type d -name "output" -o -name "builds" 2>/dev/null | while read dir; do
+              echo "Checking $dir:"
+              ls -la "$dir/" 2>/dev/null || echo "  (empty or inaccessible)"
+            done
+            
+            exit 1
           fi
     
     artifacts:
