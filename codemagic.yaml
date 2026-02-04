@@ -1,3 +1,4 @@
+# codemagic.yaml
 workflows:
   appstore-release:
     name: iOS App Store Release
@@ -6,11 +7,15 @@ workflows:
       groups:
         - appstore_signing  # 生产证书组
       vars:
-        BUNDLE_ID: "com.yourcompany.app"  # 替换为您的 Bundle ID
-        SCHEME: "YourApp"  # 替换为您的 Scheme
+        BUNDLE_ID: "com.test.ios.attaf"  # 替换为您的 Bundle ID
+        SCHEME: "123"  # 替换为您的 Scheme
     
     # iOS 自动代码签名配置 - 使用生产证书
     ios:
+      project: "123.xcodeproj"  # 或者 YourApp.xcworkspace
+      scheme: "$123"
+      configuration: "Release"
+      # 代码签名配置
       signing:
         certificate_url: $APPSTORE_CERTIFICATE_URL
         certificate_password: $APPSTORE_CERTIFICATE_PASSWORD
@@ -18,16 +23,20 @@ workflows:
     
     # 构建脚本
     scripts:
-      - name: Build for App Store
+      - name: Set up environment
         script: |
           # 设置版本号
           if [ ! -z "$BUILD_NUMBER" ]; then
             agvtool new-version -all $BUILD_NUMBER
           fi
-          
-          # 安装依赖
+      
+      - name: Install dependencies
+        script: |
+          # 安装 CocoaPods 依赖
           pod install --repo-update
-          
+      
+      - name: Build and archive
+        script: |
           # 构建归档
           xcodebuild archive \
             -workspace "YourApp.xcworkspace" \
@@ -35,6 +44,26 @@ workflows:
             -configuration Release \
             -archivePath "build/YourApp.xcarchive" \
             -destination 'generic/platform=iOS'
+      
+      - name: Export IPA
+        script: |
+          # 创建 exportOptions.plist 文件
+          cat > exportOptions.plist << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>app-store</string>
+              <key>teamID</key>
+              <string>$TEAM_ID</string>
+              <key>uploadBitcode</key>
+              <false/>
+              <key>compileBitcode</key>
+              <false/>
+          </dict>
+          </plist>
+          EOF
           
           # 导出 IPA
           xcodebuild -exportArchive \
