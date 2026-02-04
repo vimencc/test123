@@ -16,14 +16,33 @@ workflows:
         script: |
           echo "=== Manual signing setup ==="
           
+          # 清理 URL 变量中的换行符和空格
+          CERT_URL=$(echo "$APPSTORE_CERTIFICATE_URL" | tr -d '\n\r' | xargs)
+          PROFILE_URL=$(echo "$APPSTORE_PROVISIONING_PROFILE_URL" | tr -d '\n\r' | xargs)
+          CERT_PASSWORD=$(echo "$APPSTORE_CERTIFICATE_PASSWORD" | tr -d '\n\r' | xargs)
+          
+          echo "Certificate URL (cleaned): $CERT_URL"
+          echo "Profile URL (cleaned): $PROFILE_URL"
+          echo "Password length: ${#CERT_PASSWORD} chars"
+          
           # 1. 下载描述文件
           echo "Downloading provisioning profile..."
-          curl -L -o profile.mobileprovision "$APPSTORE_PROVISIONING_PROFILE_URL"
+          curl -L -o profile.mobileprovision "$PROFILE_URL"
           
           # 验证文件
           if [ ! -f "profile.mobileprovision" ]; then
             echo "❌ Failed to download profile"
-            exit 1
+            echo "Trying without quotes..."
+            # 尝试不带引号
+            curl -L -o profile.mobileprovision $PROFILE_URL
+            
+            if [ ! -f "profile.mobileprovision" ]; then
+              echo "❌ Still failed to download profile"
+              echo "URL value might be incorrect"
+              echo "Testing URL..."
+              curl -I "$PROFILE_URL" || echo "URL test failed"
+              exit 1
+            fi
           fi
           
           echo "Profile size: $(wc -c < profile.mobileprovision) bytes"
@@ -44,7 +63,20 @@ workflows:
           
           # 3. 下载并安装证书
           echo "Downloading certificate..."
-          curl -L -o certificate.p12 "$APPSTORE_CERTIFICATE_URL"
+          curl -L -o certificate.p12 "$CERT_URL"
+          
+          if [ ! -f "certificate.p12" ]; then
+            echo "❌ Failed to download certificate"
+            echo "Trying without quotes..."
+            curl -L -o certificate.p12 $CERT_URL
+          fi
+          
+          if [ ! -f "certificate.p12" ]; then
+            echo "❌ Still failed to download certificate"
+            exit 1
+          fi
+          
+          echo "Certificate size: $(wc -c < certificate.p12) bytes"
           
           # 创建专用钥匙串
           KEYCHAIN="ios_build.keychain"
@@ -58,7 +90,7 @@ workflows:
           # 导入证书
           security import certificate.p12 \
             -k "$HOME/Library/Keychains/$KEYCHAIN" \
-            -P "$APPSTORE_CERTIFICATE_PASSWORD" \
+            -P "$CERT_PASSWORD" \
             -T /usr/bin/codesign \
             -A
           
