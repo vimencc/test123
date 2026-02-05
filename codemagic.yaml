@@ -7,16 +7,13 @@ workflows:
       xcode: latest
       groups:
         - appstore_connect
+        - certificate_credentials  # 新增证书相关环境变量组
       vars:
         # 基础配置
         APP_IDENTIFIER: "com.test.ios.attaf"
         APPLE_ID: "lingya00130@gmail.com"
         TEAM_ID: "7994453ZHZ"
         XCODE_SCHEME: "123"
-        
-        # 代码签名配置
-        CODE_SIGN_IDENTITY: "Apple Distribution"
-        PROVISIONING_PROFILE_NAME: "codemagic_Production"
     
     triggering:
       events:
@@ -34,48 +31,52 @@ workflows:
         - ~/Library/Developer/Xcode/DerivedData
     
     scripts:
-      # 1. 设置环境和显示证书信息
-      - name: Setup environment
+      # 1. 设置环境和检查证书
+      - name: Setup environment and check certificates
         script: |
-          echo "=== 设置环境 ==="
+          echo "=== 设置环境和检查证书 ==="
           echo "当前目录: $(pwd)"
           echo "Scheme: $XCODE_SCHEME"
           echo "Team ID: $TEAM_ID"
           echo "Bundle ID: $APP_IDENTIFIER"
-          echo "代码签名身份: $CODE_SIGN_IDENTITY"
-          echo "配置文件: $PROVISIONING_PROFILE_NAME"
           
           # 显示项目结构
           echo "项目结构:"
           ls -la
           
-          # 显示所有可用证书
-          echo "所有可用证书:"
+          # 检查钥匙串
+          echo "检查钥匙串..."
+          security list-keychains
+          
+          # 检查所有可用证书（不筛选）
+          echo "检查所有证书:"
           security find-identity -p codesigning -v
           
           # 创建构建目录
           mkdir -p build
       
-      # 2. 使用构建参数覆盖签名配置（不修改项目文件）
-      - name: Build archive with override parameters
+      # 2. 使用Codemagic工具设置代码签名
+      - name: Use Codemagic code signing tools
         script: |
-          echo "=== 使用构建参数覆盖签名配置 ==="
+          echo "=== 使用Codemagic代码签名工具 ==="
+          
+          # 使用Codemagic的代码签名工具
+          echo "应用代码签名配置..."
+          xcode-project use-profiles
+          
+          # 再次检查证书
+          echo "应用后检查证书:"
+          security find-identity -p codesigning -v
+      
+      # 3. 构建archive（让Xcode自动处理签名）
+      - name: Build archive with auto signing
+        script: |
+          echo "=== 构建archive（让Xcode自动处理签名）==="
           
           # 清理之前的构建
           rm -rf build/*.xcarchive
           
-          # 检查证书是否可用
-          echo "检查证书 '$CODE_SIGN_IDENTITY' 是否可用..."
-          if security find-identity -p codesigning -v | grep -q "$CODE_SIGN_IDENTITY"; then
-            echo "✅ 找到证书: $CODE_SIGN_IDENTITY"
-          else
-            echo "❌ 未找到证书: $CODE_SIGN_IDENTITY"
-            echo "可用证书:"
-            security find-identity -p codesigning -v
-            exit 1
-          fi
-          
-          # 构建archive，通过构建参数覆盖签名配置
+          # 构建archive，不指定签名参数，让Xcode自动处理
           echo "构建archive..."
           if [ -d "123.xcworkspace" ]; then
             echo "使用workspace构建..."
@@ -87,10 +88,6 @@ workflows:
               -archivePath "build/$XCODE_SCHEME.xcarchive" \
               -destination 'generic/platform=iOS' \
               -allowProvisioningUpdates \
-              DEVELOPMENT_TEAM="$TEAM_ID" \
-              PROVISIONING_PROFILE_SPECIFIER="$PROVISIONING_PROFILE_NAME" \
-              CODE_SIGN_IDENTITY="$CODE_SIGN_IDENTITY" \
-              PRODUCT_BUNDLE_IDENTIFIER="$APP_IDENTIFIER" \
               2>&1 | tee build/archive.log
             
           elif [ -d "123.xcodeproj" ]; then
@@ -103,10 +100,6 @@ workflows:
               -archivePath "build/$XCODE_SCHEME.xcarchive" \
               -destination 'generic/platform=iOS' \
               -allowProvisioningUpdates \
-              DEVELOPMENT_TEAM="$TEAM_ID" \
-              PROVISIONING_PROFILE_SPECIFIER="$PROVISIONING_PROFILE_NAME" \
-              CODE_SIGN_IDENTITY="$CODE_SIGN_IDENTITY" \
-              PRODUCT_BUNDLE_IDENTIFIER="$APP_IDENTIFIER" \
               2>&1 | tee build/archive.log
           fi
           
@@ -132,7 +125,7 @@ workflows:
             exit 1
           fi
       
-      # 3. 导出IPA
+      # 4. 导出IPA
       - name: Export IPA
         script: |
           echo "=== 导出IPA ==="
@@ -154,13 +147,6 @@ workflows:
               <false/>
               <key>compileBitcode</key>
               <false/>
-              <key>provisioningProfiles</key>
-              <dict>
-                  <key>$APP_IDENTIFIER</key>
-                  <string>$PROVISIONING_PROFILE_NAME</string>
-              </dict>
-              <key>signingCertificate</key>
-              <string>$CODE_SIGN_IDENTITY</string>
           </dict>
           </plist>
           EOF
@@ -179,7 +165,7 @@ workflows:
           
           echo "✅ 导出完成"
       
-      # 4. 验证和重命名IPA文件
+      # 5. 验证和重命名IPA文件
       - name: Verify and rename IPA
         script: |
           echo "=== 验证和重命名IPA文件 ==="
@@ -218,7 +204,7 @@ workflows:
             exit 1
           fi
       
-      # 5. 显示构建摘要
+      # 6. 显示构建摘要
       - name: Build summary
         script: |
           echo "=== 构建摘要 ==="
