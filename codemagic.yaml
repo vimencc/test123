@@ -6,7 +6,7 @@ workflows:
     environment:
       xcode: latest
       groups:
-        - appstore_signing
+        # 只保留 appstore_connect 组
         - appstore_connect
       vars:
         # 基础配置
@@ -16,7 +16,7 @@ workflows:
         XCODE_SCHEME: "123"
         XCODE_WORKSPACE: "123.xcworkspace"
         
-        # 代码签名配置
+        # 代码签名配置（硬编码或从其他方式获取）
         CODE_SIGNING_IDENTITY: "Apple Distribution"
         PROVISIONING_PROFILE_NAME: "codemagic_Production"
     
@@ -66,14 +66,13 @@ workflows:
       - name: Prepare code signing
         script: |
           echo "=== 准备代码签名 ==="
+          echo "使用Codemagic UI配置的代码签名"
+          echo "团队ID: $TEAM_ID"
+          echo "应用标识符: $APP_IDENTIFIER"
           
-          # 显示可用证书
-          echo "可用证书:"
+          # 显示可用的证书
+          echo "系统钥匙串中的证书:"
           security find-identity -p codesigning -v
-          
-          # 检查配置文件
-          echo "配置文件目录:"
-          ls -la ~/Library/MobileDevice/Provisioning\ Profiles/ 2>/dev/null | head -10 || echo "配置文件目录不存在"
           
           # 创建export_options.plist
           cat > export_options.plist << EOF
@@ -100,7 +99,7 @@ workflows:
           
           echo "✅ 代码签名准备完成"
       
-      # 3. 构建应用（使用Codemagic工具）
+      # 3. 使用Codemagic内置工具构建
       - name: Build with Codemagic tools
         script: |
           echo "=== 使用Codemagic工具构建 ==="
@@ -121,6 +120,8 @@ workflows:
           
           # 使用Codemagic工具构建
           echo "开始构建..."
+          
+          # 应用代码签名配置文件
           xcode-project use-profiles
           
           # 构建命令
@@ -129,8 +130,7 @@ workflows:
             --scheme "$XCODE_SCHEME" \
             --output "build" \
             --archive-flags "-destination 'generic/platform=iOS' -allowProvisioningUpdates" \
-            --export-options-plist "export_options.plist" \
-            --disable-codesign false
+            --export-options-plist "export_options.plist"
           
           echo "✅ 构建命令执行完成"
       
@@ -164,7 +164,6 @@ workflows:
                   provisioningProfiles: {
                     "$APP_IDENTIFIER" => "$PROVISIONING_PROFILE_NAME"
                   },
-                  signingCertificate: "$CODE_SIGNING_IDENTITY",
                   teamID: "$TEAM_ID"
                 },
                 clean: true
