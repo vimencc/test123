@@ -13,6 +13,10 @@ workflows:
         APPLE_ID: "lingya00130@gmail.com"
         TEAM_ID: "7994453ZHZ"
         XCODE_SCHEME: "123"
+        
+        # 代码签名配置
+        CODE_SIGN_IDENTITY: "Apple Distribution"
+        PROVISIONING_PROFILE_NAME: "codemagic_Production"
     
     triggering:
       events:
@@ -30,111 +34,101 @@ workflows:
         - ~/Library/Developer/Xcode/DerivedData
     
     scripts:
-      # 1. 设置环境和显示项目签名配置
-      - name: Setup and show signing configuration
+      # 1. 设置环境和显示证书信息
+      - name: Setup environment
         script: |
-          echo "=== 设置和显示签名配置 ==="
+          echo "=== 设置环境 ==="
           echo "当前目录: $(pwd)"
           echo "Scheme: $XCODE_SCHEME"
           echo "Team ID: $TEAM_ID"
           echo "Bundle ID: $APP_IDENTIFIER"
+          echo "代码签名身份: $CODE_SIGN_IDENTITY"
+          echo "配置文件: $PROVISIONING_PROFILE_NAME"
           
           # 显示项目结构
           echo "项目结构:"
           ls -la
           
-          # 显示项目的代码签名配置
-          if [ -f "123.xcodeproj/project.pbxproj" ]; then
-            echo "项目文件中的签名配置:"
-            echo "1. CODE_SIGN_STYLE:"
-            grep -n "CODE_SIGN_STYLE" 123.xcodeproj/project.pbxproj || echo "未找到CODE_SIGN_STYLE"
-            echo ""
-            echo "2. CODE_SIGN_IDENTITY:"
-            grep -n "CODE_SIGN_IDENTITY" 123.xcodeproj/project.pbxproj || echo "未找到CODE_SIGN_IDENTITY"
-            echo ""
-            echo "3. DEVELOPMENT_TEAM:"
-            grep -n "DEVELOPMENT_TEAM" 123.xcodeproj/project.pbxproj | head -5 || echo "未找到DEVELOPMENT_TEAM"
-            echo ""
-            echo "4. PROVISIONING_PROFILE:"
-            grep -n "PROVISIONING_PROFILE" 123.xcodeproj/project.pbxproj || echo "未找到PROVISIONING_PROFILE"
-          fi
+          # 显示所有可用证书
+          echo "所有可用证书:"
+          security find-identity -p codesigning -v
+          
+          # 显示配置文件
+          echo "已安装的配置文件:"
+          find ~/Library/MobileDevice/Provisioning\ Profiles -name "*.mobileprovision" -exec sh -c 'echo "=== {} ===" && security cms -D -i {} 2>/dev/null | grep -A 1 -B 1 "Name\|ApplicationIdentifier\|TeamName"' \; 2>/dev/null | head -30 || true
           
           # 创建构建目录
           mkdir -p build
       
-      # 2. 修复项目中的代码签名冲突
-      - name: Fix code signing conflicts
+      # 2. 修复项目配置为手动签名
+      - name: Configure manual signing
         script: |
-          echo "=== 修复代码签名冲突 ==="
+          echo "=== 配置手动签名 ==="
           
           if [ -f "123.xcodeproj/project.pbxproj" ]; then
             echo "备份项目文件..."
             cp 123.xcodeproj/project.pbxproj 123.xcodeproj/project.pbxproj.backup
             
-            # 移除所有CODE_SIGN_IDENTITY设置（解决冲突）
-            echo "移除CODE_SIGN_IDENTITY设置..."
+            # 设置手动签名
+            echo "设置CODE_SIGN_STYLE为Manual..."
+            sed -i '' 's/CODE_SIGN_STYLE = [^;]*;/CODE_SIGN_STYLE = Manual;/g' 123.xcodeproj/project.pbxproj
+            
+            # 设置代码签名身份
+            echo "设置CODE_SIGN_IDENTITY为$CODE_SIGN_IDENTITY..."
+            # 先移除现有的
             sed -i '' '/CODE_SIGN_IDENTITY/d' 123.xcodeproj/project.pbxproj
+            # 在合适的位置添加
+            sed -i '' '/Begin XCBuildConfiguration section/,/End XCBuildConfiguration section/ s/Release = {/Release = {\n\t\t\tCODE_SIGN_IDENTITY = '"$CODE_SIGN_IDENTITY"';/' 123.xcodeproj/project.pbxproj
             
-            # 确保CODE_SIGN_STYLE设置为Automatic
-            echo "设置CODE_SIGN_STYLE为Automatic..."
-            sed -i '' 's/CODE_SIGN_STYLE = [^;]*;/CODE_SIGN_STYLE = Automatic;/g' 123.xcodeproj/project.pbxproj
-            
-            # 如果项目中没有CODE_SIGN_STYLE，添加它
-            if ! grep -q "CODE_SIGN_STYLE = Automatic" 123.xcodeproj/project.pbxproj; then
-              echo "添加CODE_SIGN_STYLE设置..."
-              # 在合适的位置添加CODE_SIGN_STYLE
-              sed -i '' '/Begin XCBuildConfiguration section/,/End XCBuildConfiguration section/ s/Release = {/Release = {\n\t\t\tCODE_SIGN_STYLE = Automatic;/' 123.xcodeproj/project.pbxproj
-              sed -i '' '/Begin XCBuildConfiguration section/,/End XCBuildConfiguration section/ s/Debug = {/Debug = {\n\t\t\tCODE_SIGN_STYLE = Automatic;/' 123.xcodeproj/project.pbxproj
-            fi
-            
-            # 确保有正确的开发团队
-            echo "设置开发团队为: $TEAM_ID"
+            # 设置开发团队
+            echo "设置DEVELOPMENT_TEAM为$TEAM_ID..."
             sed -i '' "s/DEVELOPMENT_TEAM = [^;]*;/DEVELOPMENT_TEAM = $TEAM_ID;/g" 123.xcodeproj/project.pbxproj
             
-            # 确保有正确的bundle identifier
-            echo "设置bundle identifier为: $APP_IDENTIFIER"
+            # 设置bundle identifier
+            echo "设置PRODUCT_BUNDLE_IDENTIFIER为$APP_IDENTIFIER..."
             sed -i '' "s/PRODUCT_BUNDLE_IDENTIFIER = [^;]*;/PRODUCT_BUNDLE_IDENTIFIER = $APP_IDENTIFIER;/g" 123.xcodeproj/project.pbxproj
             
-            # 移除所有provisioning profile设置（让自动签名处理）
-            echo "移除所有provisioning profile设置..."
-            sed -i '' '/PROVISIONING_PROFILE/d' 123.xcodeproj/project.pbxproj
+            # 设置provisioning profile
+            echo "设置PROVISIONING_PROFILE_SPECIFIER为$PROVISIONING_PROFILE_NAME..."
+            # 先移除现有的
             sed -i '' '/PROVISIONING_PROFILE_SPECIFIER/d' 123.xcodeproj/project.pbxproj
+            # 在合适的位置添加
+            sed -i '' '/Begin XCBuildConfiguration section/,/End XCBuildConfiguration section/ s/Release = {/Release = {\n\t\t\tPROVISIONING_PROFILE_SPECIFIER = '"$PROVISIONING_PROFILE_NAME"';/' 123.xcodeproj/project.pbxproj
             
-            echo "✅ 代码签名冲突已修复"
-            echo "修复后的配置:"
+            echo "✅ 手动签名配置完成"
+            
+            # 显示修改后的配置
+            echo "修改后的配置:"
             echo "CODE_SIGN_STYLE:"
-            grep -n "CODE_SIGN_STYLE" 123.xcodeproj/project.pbxproj || echo "未找到"
+            grep -n "CODE_SIGN_STYLE" 123.xcodeproj/project.pbxproj
             echo "CODE_SIGN_IDENTITY:"
-            grep -n "CODE_SIGN_IDENTITY" 123.xcodeproj/project.pbxproj || echo "已移除"
+            grep -n "CODE_SIGN_IDENTITY" 123.xcodeproj/project.pbxproj
+            echo "PROVISIONING_PROFILE_SPECIFIER:"
+            grep -n "PROVISIONING_PROFILE_SPECIFIER" 123.xcodeproj/project.pbxproj
           else
-            echo "⚠️ 未找到项目配置文件，跳过修复"
+            echo "⚠️ 未找到项目配置文件，跳过配置"
           fi
       
-      # 3. 使用完全自动签名构建
-      - name: Build with clean automatic signing
+      # 3. 使用手动签名构建archive
+      - name: Build archive with manual signing
         script: |
-          echo "=== 使用完全自动签名构建 ==="
+          echo "=== 使用手动签名构建archive ==="
           
           # 清理之前的构建
           rm -rf build/*.xcarchive
           
           # 显示当前可用的证书
-          echo "可用证书:"
-          security find-identity -p codesigning -v | grep -i "apple" || true
-          
-          # 显示当前可用的配置文件
-          echo "可用配置文件:"
-          ls -la ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision 2>/dev/null | head -5 || echo "无配置文件"
-          
-          # 使用xcodebuild的clean命令
-          echo "清理项目..."
-          if [ -d "123.xcworkspace" ]; then
-            xcodebuild clean -workspace "123.xcworkspace" -scheme "$XCODE_SCHEME" -configuration Release 2>&1 | tail -10 || true
-          elif [ -d "123.xcodeproj" ]; then
-            xcodebuild clean -project "123.xcodeproj" -scheme "$XCODE_SCHEME" -configuration Release 2>&1 | tail -10 || true
+          echo "检查证书 '$CODE_SIGN_IDENTITY' 是否可用..."
+          if security find-identity -p codesigning -v | grep -q "$CODE_SIGN_IDENTITY"; then
+            echo "✅ 找到证书: $CODE_SIGN_IDENTITY"
+          else
+            echo "❌ 未找到证书: $CODE_SIGN_IDENTITY"
+            echo "可用证书:"
+            security find-identity -p codesigning -v
+            exit 1
           fi
           
-          # 构建archive，不指定任何签名参数（让项目配置决定）
+          # 构建archive，使用项目中的手动签名配置
           echo "构建archive..."
           if [ -d "123.xcworkspace" ]; then
             echo "使用workspace构建..."
@@ -165,25 +159,30 @@ workflows:
           if [ -d "build/$XCODE_SCHEME.xcarchive" ]; then
             echo "✅ archive构建成功"
             
-            # 显示archive中的签名信息
-            echo "Archive签名信息:"
-            codesign -d -vvv "build/$XCODE_SCHEME.xcarchive/Products/Applications/$XCODE_SCHEME.app" 2>&1 | head -20 || echo "无法获取签名信息"
+            # 显示archive中的app签名信息
+            echo "检查archive中的签名..."
+            APP_PATH="build/$XCODE_SCHEME.xcarchive/Products/Applications/$XCODE_SCHEME.app"
+            if [ -d "$APP_PATH" ]; then
+              codesign -d -vvv "$APP_PATH" 2>&1 | grep -E "Authority|TeamIdentifier|Identifier" || echo "无法获取签名详情"
+            else
+              echo "⚠️ 未找到.app文件"
+            fi
           else
             echo "❌ archive构建失败"
             echo "查看日志:"
-            tail -50 build/archive.log
+            tail -100 build/archive.log
             exit 1
           fi
       
-      # 4. 导出IPA（使用手动指定profile）
-      - name: Export IPA with specific profile
+      # 4. 导出IPA
+      - name: Export IPA
         script: |
           echo "=== 导出IPA ==="
           
           # 清理之前的IPA
           rm -rf build/*.ipa
           
-          # 创建export_options.plist，明确指定使用codemagic_Production
+          # 创建export_options.plist
           cat > build/export_options.plist << EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -200,10 +199,10 @@ workflows:
               <key>provisioningProfiles</key>
               <dict>
                   <key>$APP_IDENTIFIER</key>
-                  <string>codemagic_Production</string>
+                  <string>$PROVISIONING_PROFILE_NAME</string>
               </dict>
               <key>signingCertificate</key>
-              <string>Apple Distribution</string>
+              <string>$CODE_SIGN_IDENTITY</string>
           </dict>
           </plist>
           EOF
@@ -233,8 +232,8 @@ workflows:
           
           if [ -z "$IPA_FILES" ]; then
             echo "❌ 未找到IPA文件"
-            echo "导出日志最后50行:"
-            tail -50 build/export.log || echo "无导出日志"
+            echo "导出日志最后100行:"
+            tail -100 build/export.log || echo "无导出日志"
             exit 1
           fi
           
@@ -255,7 +254,7 @@ workflows:
             
             # 验证签名
             echo "验证IPA签名..."
-            codesign -d -vvv "build/$XCODE_SCHEME.ipa" 2>&1 | head -10 || echo "无法验证IPA签名"
+            codesign -d -vvv "build/$XCODE_SCHEME.ipa" 2>&1 | grep -E "Authority|TeamIdentifier|Identifier" || echo "无法验证IPA签名"
           else
             echo "❌ IPA文件未创建"
             exit 1
@@ -274,6 +273,8 @@ workflows:
           echo "文件大小:"
           du -h "build/$XCODE_SCHEME.ipa" 2>/dev/null || echo "IPA文件不存在"
           du -h "build/$XCODE_SCHEME.xcarchive" 2>/dev/null || echo "Archive不存在"
+          echo ""
+          echo "构建完成时间: $(date)"
     
     artifacts:
       - build/*.ipa
