@@ -37,6 +37,7 @@ workflows:
           echo "当前目录: $(pwd)"
           echo "团队ID: $TEAM_ID"
           echo "应用标识符: $APP_IDENTIFIER"
+          echo "Scheme: $XCODE_SCHEME"
           
           # 显示项目结构
           echo "项目结构:"
@@ -55,26 +56,70 @@ workflows:
           # 创建构建目录
           mkdir -p build
       
-      # 2. 安装依赖（如果需要）
-      - name: Install dependencies
+      # 2. 使用Codemagic的代码签名工具
+      - name: Setup code signing with Codemagic
         script: |
-          echo "=== 安装依赖 ==="
+          echo "=== 设置代码签名 ==="
           
-          if [ -f "Podfile" ]; then
-            echo "安装CocoaPods依赖..."
-            pod install
-          else
-            echo "没有Podfile，跳过CocoaPods安装"
-          fi
-      
-      # 3. 准备代码签名
-      - name: Prepare code signing
-        script: |
-          echo "=== 准备代码签名 ==="
+          # 应用Codemagic中配置的代码签名证书和配置文件
+          xcode-project use-profiles
           
-          # 显示可用证书
+          # 显示可用的证书
           echo "可用证书:"
           security find-identity -p codesigning -v
+      
+      # 3. 构建archive
+      - name: Build archive
+        script: |
+          echo "=== 构建archive ==="
+          
+          # 清理之前的构建
+          rm -rf build/*.xcarchive
+          
+          if [ -d "123.xcworkspace" ]; then
+            echo "使用workspace构建..."
+            
+            # 构建archive，使用自动签名
+            xcodebuild archive \
+              -workspace "123.xcworkspace" \
+              -scheme "$XCODE_SCHEME" \
+              -configuration Release \
+              -archivePath "build/$XCODE_SCHEME.xcarchive" \
+              -destination 'generic/platform=iOS' \
+              -allowProvisioningUpdates \
+              2>&1 | tee build/archive.log
+            
+          elif [ -d "123.xcodeproj" ]; then
+            echo "使用project构建..."
+            
+            # 构建archive，使用自动签名
+            xcodebuild archive \
+              -project "123.xcodeproj" \
+              -scheme "$XCODE_SCHEME" \
+              -configuration Release \
+              -archivePath "build/$XCODE_SCHEME.xcarchive" \
+              -destination 'generic/platform=iOS' \
+              -allowProvisioningUpdates \
+              2>&1 | tee build/archive.log
+          fi
+          
+          # 检查archive是否成功
+          if [ -d "build/$XCODE_SCHEME.xcarchive" ]; then
+            echo "✅ archive构建成功"
+          else
+            echo "❌ archive构建失败"
+            echo "查看日志:"
+            tail -50 build/archive.log
+            exit 1
+          fi
+      
+      # 4. 导出IPA
+      - name: Export IPA
+        script: |
+          echo "=== 导出IPA ==="
+          
+          # 清理之前的IPA
+          rm -rf build/*.ipa
           
           # 创建export_options.plist
           cat > build/export_options.plist << EOF
@@ -94,65 +139,6 @@ workflows:
           </plist>
           EOF
           
-          echo "✅ 代码签名准备完成"
-      
-      # 4. 构建archive（修正版：添加开发团队）
-      - name: Build archive with team
-        script: |
-          echo "=== 构建archive（使用开发团队）==="
-          
-          # 清理之前的构建
-          rm -rf build/*.xcarchive
-          
-          if [ -d "123.xcworkspace" ]; then
-            echo "使用workspace构建..."
-            
-            # 构建archive，指定开发团队
-            xcodebuild archive \
-              -workspace "123.xcworkspace" \
-              -scheme "$XCODE_SCHEME" \
-              -configuration Release \
-              -archivePath "build/$XCODE_SCHEME.xcarchive" \
-              -destination 'generic/platform=iOS' \
-              -allowProvisioningUpdates \
-              DEVELOPMENT_TEAM="$TEAM_ID" \
-              PRODUCT_BUNDLE_IDENTIFIER="$APP_IDENTIFIER" \
-              2>&1 | tee build/archive.log
-            
-          elif [ -d "123.xcodeproj" ]; then
-            echo "使用project构建..."
-            
-            # 构建archive，指定开发团队
-            xcodebuild archive \
-              -project "123.xcodeproj" \
-              -scheme "$XCODE_SCHEME" \
-              -configuration Release \
-              -archivePath "build/$XCODE_SCHEME.xcarchive" \
-              -destination 'generic/platform=iOS' \
-              -allowProvisioningUpdates \
-              DEVELOPMENT_TEAM="$TEAM_ID" \
-              PRODUCT_BUNDLE_IDENTIFIER="$APP_IDENTIFIER" \
-              2>&1 | tee build/archive.log
-          fi
-          
-          # 检查archive是否成功
-          if [ -d "build/$XCODE_SCHEME.xcarchive" ]; then
-            echo "✅ archive构建成功"
-          else
-            echo "❌ archive构建失败"
-            echo "查看日志:"
-            tail -50 build/archive.log
-            exit 1
-          fi
-      
-      # 5. 导出IPA
-      - name: Export IPA
-        script: |
-          echo "=== 导出IPA ==="
-          
-          # 清理之前的IPA
-          rm -rf build/*.ipa
-          
           # 执行导出
           xcodebuild -exportArchive \
             -archivePath "build/$XCODE_SCHEME.xcarchive" \
@@ -163,7 +149,7 @@ workflows:
           
           echo "✅ 导出完成"
       
-      # 6. 验证和重命名IPA文件
+      # 5. 验证和重命名IPA文件
       - name: Verify and rename IPA
         script: |
           echo "=== 验证和重命名IPA文件 ==="
@@ -202,7 +188,7 @@ workflows:
             exit 1
           fi
       
-      # 7. 显示构建摘要
+      # 6. 显示构建摘要
       - name: Build summary
         script: |
           echo "=== 构建摘要 ==="
