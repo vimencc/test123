@@ -1,19 +1,24 @@
 workflows:
-  ios-simple:
-    name: iOS Simple Build
+  ios-env-signing:
+    name: iOS Environment Signing
     environment:
       xcode: latest
       cocoapods: default
       vars:
         BUNDLE_ID: "com.test.ios.attaf"
       
-      # 自动签名配置
-      ios_signing:
-        distribution_type: app_store  # development, ad_hoc, 或 app_store
-        bundle_identifier: $BUNDLE_ID
-        # 不需要 certificate_type，Codemagic 会自动处理
+      # 使用环境变量组中的证书
+      groups:
+        - ios_signing_credentials  # 在Codemagic UI中创建此组
+    
+    # 不需要在YAML中指定ios_signing，Codemagic会自动使用环境变量组中的证书
     
     scripts:
+      - name: 验证签名证书
+        script: |
+          # 检查证书是否已加载
+          security find-identity -v -p codesigning
+      
       - name: 安装依赖
         script: |
           if [ -f "Podfile" ]; then
@@ -25,13 +30,15 @@ workflows:
             echo "未找到Podfile，跳过pod install"
           fi
       
-      - name: 构建和导出
+      - name: 构建应用
         script: |
-          # 使用Codemagic提供的简化构建命令
+          # 构建选项
           xcode-project build-ios \
             --workspace "$(find . -name '*.xcworkspace' -type d | head -1)" \
             --scheme "$(xcodebuild -list -json | jq -r '.workspace.schemes[0]')" \
-            --export-options-plist-config '{"method": "app-store"}'
+            --output "build/ios" \
+            --codesigning "manual" \
+            --export-options-plist-config '{"method": "app-store", "uploadBitcode": false}'
     
     artifacts:
       - build/ios/ipa/*.ipa
