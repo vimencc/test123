@@ -1,22 +1,62 @@
 workflows:
-  ios-minimal:
-    name: iOS Minimal Build
+  ios-correct:
+    name: iOS Correct Build
     environment:
       xcode: latest
+      cocoapods: default
       vars:
         BUNDLE_ID: "com.test.ios.attaf"
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: $BUNDLE_ID
+        XCODE_SCHEME: "123"  # 替换为你的实际scheme名称
+      groups:
+        - ios_signing_credentials
     
     scripts:
+      - name: 安装依赖
+        script: |
+          if [ -f "Podfile" ]; then
+            pod install
+          elif [ -f "ios/Podfile" ]; then
+            cd ios
+            pod install
+          fi
+      
+      - name: 使用配置文件
+        script: |
+          echo "使用配置文件..."
+          xcode-project use-profiles
+      
       - name: 构建IPA
         script: |
-          # 最简单的构建命令
-          xcode-project build-ipa \
-            --workspace "$(find . -name '*.xcworkspace' -type d | head -1)" \
-            --scheme "$(xcodebuild -list -json | jq -r '.workspace.schemes[0]')" \
-            --export-method "app-store"
+          echo "开始构建IPA..."
+          
+          # 查找workspace或project
+          WORKSPACE=$(find . -name "*.xcworkspace" -type d | head -1)
+          PROJECT=$(find . -name "*.xcodeproj" -type d | head -1)
+          
+          if [ -n "$WORKSPACE" ]; then
+            echo "使用workspace: $WORKSPACE"
+            
+            # 方法1: 使用xcode-project build-ipa命令（最简单）
+            # 注意：需要先设置正确的导出选项
+            xcode-project build-ipa \
+              --workspace "$WORKSPACE" \
+              --scheme "$XCODE_SCHEME" \
+              --output "build/ios/ipa"
+              
+          elif [ -n "$PROJECT" ]; then
+            echo "使用project: $PROJECT"
+            
+            xcode-project build-ipa \
+              --project "$PROJECT" \
+              --scheme "$XCODE_SCHEME" \
+              --output "build/ios/ipa"
+          else
+            echo "错误: 未找到Xcode项目文件"
+            exit 1
+          fi
+          
+          echo "IPA构建完成!"
+          ls -la "build/ios/ipa/"
     
     artifacts:
       - build/ios/ipa/*.ipa
