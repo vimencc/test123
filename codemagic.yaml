@@ -1,44 +1,29 @@
 workflows:
-  ios-release:
-    name: iOS Release
+  ios-minimal:
+    name: iOS Minimal Build
     environment:
       xcode: latest
-      cocoapods: default
       vars:
         BUNDLE_ID: "com.test.ios.attaf"
-        XCODE_WORKSPACE: "123.xcworkspace"
-        XCODE_SCHEME: "123"
       ios_signing:
         distribution_type: app_store
         bundle_identifier: $BUNDLE_ID
-      groups:
-        - app_store_connect
-
+    
     scripts:
-      - name: Install CocoaPods dependencies
+      - name: 构建IPA
         script: |
-          pod install
-
-      - name: Build and export
-        script: |
-          xcode-project build-ios \
-            --workspace "$XCODE_WORKSPACE" \
-            --scheme "$XCODE_SCHEME" \
-            --output "build/ios/ipa"
-
+          # 最简单的构建命令
+          xcode-project build-ipa \
+            --workspace "$(find . -name '*.xcworkspace' -type d | head -1)" \
+            --scheme "$(xcodebuild -list -json | jq -r '.workspace.schemes[0]')" \
+            --export-method "app-store"
+    
     artifacts:
       - build/ios/ipa/*.ipa
-
+    
     publishing:
       app_store_connect:
         api_key: $APP_STORE_CONNECT_PRIVATE_KEY
         key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
         issuer_id: $APP_STORE_CONNECT_ISSUER_ID
         submit_to_testflight: true
-        submit_to_app_store: false
-      email:
-        recipients:
-          - 717@stlnd.com
-        notify:
-          success: true
-          failure: true
