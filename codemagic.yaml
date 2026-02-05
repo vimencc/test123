@@ -6,16 +6,16 @@ workflows:
       cocoapods: default
       vars:
         BUNDLE_ID: "com.test.ios.attaf"
+      
+      # 自动签名配置
       ios_signing:
-        distribution_type: app_store
+        distribution_type: app_store  # development, ad_hoc, 或 app_store
         bundle_identifier: $BUNDLE_ID
-        certificate_type: ios_distribution
+        # 不需要 certificate_type，Codemagic 会自动处理
     
     scripts:
-      # 尝试自动查找并安装pods
       - name: 安装依赖
         script: |
-          # 如果找到Podfile就安装
           if [ -f "Podfile" ]; then
             pod install
           elif [ -f "ios/Podfile" ]; then
@@ -25,9 +25,9 @@ workflows:
             echo "未找到Podfile，跳过pod install"
           fi
       
-      # 使用Codemagic提供的简化构建命令
       - name: 构建和导出
         script: |
+          # 使用Codemagic提供的简化构建命令
           xcode-project build-ios \
             --workspace "$(find . -name '*.xcworkspace' -type d | head -1)" \
             --scheme "$(xcodebuild -list -json | jq -r '.workspace.schemes[0]')" \
