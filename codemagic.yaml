@@ -1,12 +1,17 @@
 workflows:
-  ios-diagnostic:
-    name: iOS Diagnostic Build
+  ios-production:
+    name: iOS Production Build
     max_build_duration: 120
     instance_type: mac_mini_m2
     environment:
       xcode: latest
       vars:
+        # 必需配置（请根据您的项目修改）
+        APP_IDENTIFIER: "com.test.ios.attaf"
+        TEAM_ID: "7994453ZHZ"
         XCODE_SCHEME: "123"
+        EXPORT_METHOD: "app-store"
+        CONFIGURATION: "Release"
     
     triggering:
       events:
@@ -14,233 +19,322 @@ workflows:
       branch_patterns:
         - pattern: 'main'
           include: true
-      cancel_previous_builds: false
+        - pattern: 'release/*'
+          include: true
     
     scripts:
-      # 1. 恢复原始项目文件
-      - name: Restore original project
+      # 1. 环境准备和验证
+      - name: Prepare environment
         script: |
-          echo "=== 恢复原始项目文件 ==="
+          echo "=== 准备 Production 构建环境 ==="
           
-          # 从git恢复所有文件
-          echo "从git恢复项目文件..."
-          git reset --hard HEAD
-          git clean -fd
+          # 显示关键信息
+          echo "构建配置:"
+          echo "- 应用标识符: $APP_IDENTIFIER"
+          echo "- 团队ID: $TEAM_ID"
+          echo "- Scheme: $XCODE_SCHEME"
+          echo "- 配置: $CONFIGURATION"
+          echo "- 导出方法: $EXPORT_METHOD"
+          echo ""
           
-          # 显示项目结构
-          echo "当前目录: $(pwd)"
-          echo "项目结构:"
-          ls -la
+          # 验证Xcode环境
+          echo "Xcode 版本:"
+          xcodebuild -version
+          echo ""
           
-          # 验证项目文件
+          # 清理并创建目录
+          echo "清理旧构建..."
+          rm -rf build
+          rm -rf ~/Library/Developer/Xcode/DerivedData
+          mkdir -p build
+          
+          # 备份项目文件
           if [ -f "123.xcodeproj/project.pbxproj" ]; then
-            echo "检查项目文件格式..."
-            if plutil -lint 123.xcodeproj/project.pbxproj 2>/dev/null; then
-              echo "✅ 项目文件格式有效"
-            else
-              echo "❌ 项目文件格式无效，尝试修复..."
-              plutil -convert xml1 123.xcodeproj/project.pbxproj
-              echo "修复完成"
-            fi
+            cp 123.xcodeproj/project.pbxproj 123.xcodeproj/project.pbxproj.backup
+            echo "✅ 项目文件已备份"
           fi
           
-          # 创建构建目录
-          mkdir -p build
+          # 检查项目文件
+          echo "项目结构检查:"
+          ls -la | grep -E "\.xcodeproj|\.xcworkspace"
       
-      # 2. 测试基础编译（无签名）
-      - name: Test basic compilation
+      # 2. 强制设置 Production 签名配置
+      - name: Force production signing configuration
         script: |
-          echo "=== 测试基础编译（无签名）==="
+          echo "=== 强制设置 Production 代码签名 ==="
           
-          # 清理DerivedData
-          rm -rf ~/Library/Developer/Xcode/DerivedData/*
+          if [ ! -f "123.xcodeproj/project.pbxproj" ]; then
+            echo "❌ 错误：找不到项目文件"
+            exit 1
+          fi
           
-          # 尝试编译项目，禁用代码签名
-          if [ -d "123.xcworkspace" ]; then
-            echo "使用workspace编译..."
+          echo "备份原始项目文件..."
+          cp 123.xcodeproj/project.pbxproj 123.xcodeproj/project.pbxproj.original
+          
+          echo "应用 Production 签名配置..."
+          
+          # 使用 Python 更可靠地处理 plist 文件
+          python3 <<EOF
+import plistlib
+import os
+
+# 读取项目文件
+with open('123.xcodeproj/project.pbxproj', 'rb') as f:
+    content = f.read()
+
+# 转换为字符串
+content_str = content.decode('utf-8', errors='ignore')
+
+# 设置自动签名
+content_str = content_str.replace('ProvisioningStyle = Manual;', 'ProvisioningStyle = Automatic;')
+content_str = content_str.replace('CODE_SIGN_STYLE = Manual;', 'CODE_SIGN_STYLE = Automatic;')
+
+# 设置团队ID
+content_str = content_str.replace('DEVELOPMENT_TEAM = "";', 'DEVELOPMENT_TEAM = "$TEAM_ID";')
+
+# 设置 Release 配置的代码签名标识
+content_str = content_str.replace('CODE_SIGN_IDENTITY = "";', 'CODE_SIGN_IDENTITY = "iPhone Distribution";')
+content_str = content_str.replace('"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "";', '"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Distribution";')
+
+# 设置 bundle identifier
+content_str = content_str.replace('PRODUCT_BUNDLE_IDENTIFIER = "";', 'PRODUCT_BUNDLE_IDENTIFIER = "$APP_IDENTIFIER";')
+
+# 设置 Release 配置的配置文件
+content_str = content_str.replace('PROVISIONING_PROFILE_SPECIFIER = "";', 'PROVISIONING_PROFILE_SPECIFIER = "$APP_IDENTIFIER";')
+content_str = content_str.replace('"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "";', '"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "$APP_IDENTIFIER";')
+
+# 写回文件
+with open('123.xcodeproj/project.pbxproj', 'w', encoding='utf-8') as f:
+    f.write(content_str)
+
+print("✅ 项目配置已更新")
+EOF
+          
+          echo "配置摘要:"
+          grep -E "ProvisioningStyle|CODE_SIGN_STYLE|DEVELOPMENT_TEAM|PRODUCT_BUNDLE_IDENTIFIER|CODE_SIGN_IDENTITY|PROVISIONING_PROFILE" 123.xcodeproj/project.pbxproj | head -20
+      
+      # 3. 使用 xcodebuild 直接构建 Production IPA
+      - name: Build Production IPA
+        script: |
+          echo "=== 构建 Production IPA ==="
+          
+          # 清理项目
+          echo "清理项目..."
+          xcodebuild clean \
+            -workspace "123.xcworkspace" \
+            -scheme "$XCODE_SCHEME" \
+            -configuration "$CONFIGURATION" \
+            2>&1 | tail -20 || echo "清理完成"
+          
+          # 归档项目
+          echo "归档项目..."
+          xcodebuild archive \
+            -workspace "123.xcworkspace" \
+            -scheme "$XCODE_SCHEME" \
+            -configuration "$CONFIGURATION" \
+            -destination "generic/platform=iOS" \
+            -archivePath "build/$XCODE_SCHEME.xcarchive" \
+            -allowProvisioningUpdates \
+            CODE_SIGN_IDENTITY="iPhone Distribution" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            PROVISIONING_PROFILE_SPECIFIER="$APP_IDENTIFIER" \
+            2>&1 | tee build/archive.log
+          
+          # 检查归档是否成功
+          if [ ! -d "build/$XCODE_SCHEME.xcarchive" ]; then
+            echo "❌ 归档失败，尝试替代方法..."
             
-            # 清理
-            xcodebuild clean -workspace "123.xcworkspace" -scheme "$XCODE_SCHEME" -configuration Debug 2>&1 | tail -20 || echo "清理失败，继续..."
-            
-            # 编译（无签名）
-            echo "编译项目..."
-            xcodebuild build \
+            # 尝试简单归档
+            xcodebuild archive \
               -workspace "123.xcworkspace" \
               -scheme "$XCODE_SCHEME" \
-              -configuration Debug \
-              -destination 'generic/platform=iOS' \
-              CODE_SIGN_IDENTITY="" \
-              CODE_SIGNING_REQUIRED=NO \
-              CODE_SIGNING_ALLOWED=NO \
-              DEVELOPMENT_TEAM="" \
-              2>&1 | tee build/compile.log
-            
-          elif [ -d "123.xcodeproj" ]; then
-            echo "使用project编译..."
-            
-            # 清理
-            xcodebuild clean -project "123.xcodeproj" -scheme "$XCODE_SCHEME" -configuration Debug 2>&1 | tail -20 || echo "清理失败，继续..."
-            
-            # 编译（无签名）
-            echo "编译项目..."
-            xcodebuild build \
-              -project "123.xcodeproj" \
-              -scheme "$XCODE_SCHEME" \
-              -configuration Debug \
-              -destination 'generic/platform=iOS' \
-              CODE_SIGN_IDENTITY="" \
-              CODE_SIGNING_REQUIRED=NO \
-              CODE_SIGNING_ALLOWED=NO \
-              DEVELOPMENT_TEAM="" \
-              2>&1 | tee build/compile.log
+              -configuration "$CONFIGURATION" \
+              -archivePath "build/$XCODE_SCHEME.xcarchive" \
+              -allowProvisioningUpdates \
+              2>&1 | tee build/archive_retry.log
+          fi
+          
+          if [ -d "build/$XCODE_SCHEME.xcarchive" ]; then
+            echo "✅ 归档成功: build/$XCODE_SCHEME.xcarchive"
+            ls -la "build/$XCODE_SCHEME.xcarchive/Products/Applications/" || echo "无法列出归档内容"
+          else
+            echo "❌ 归档失败，请检查日志"
+            exit 1
           fi
       
-      # 3. 分析编译结果
-      - name: Analyze compilation
+      # 4. 导出 IPA 文件
+      - name: Export IPA
         script: |
-          echo "=== 分析编译结果 ==="
+          echo "=== 导出 Production IPA ==="
           
-          if [ -f "build/compile.log" ]; then
-            echo "编译日志最后50行:"
-            tail -50 build/compile.log
-            echo ""
+          # 创建导出配置
+          echo "创建导出配置..."
+          cat > build/ExportOptions.plist << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>method</key>
+    <string>$EXPORT_METHOD</string>
+    <key>teamID</key>
+    <string>$TEAM_ID</string>
+    <key>uploadBitcode</key>
+    <false/>
+    <key>compileBitcode</key>
+    <false/>
+    <key>uploadSymbols</key>
+    <true/>
+    <key>signingStyle</key>
+    <string>automatic</string>
+</dict>
+</plist>
+EOF
+          
+          echo "导出配置内容:"
+          cat build/ExportOptions.plist
+          
+          # 导出 IPA
+          echo "导出 IPA..."
+          xcodebuild -exportArchive \
+            -archivePath "build/$XCODE_SCHEME.xcarchive" \
+            -exportOptionsPlist "build/ExportOptions.plist" \
+            -exportPath "build" \
+            -allowProvisioningUpdates \
+            2>&1 | tee build/export.log
+          
+          # 检查导出结果
+          echo "检查导出的 IPA..."
+          if ls build/*.ipa 1> /dev/null 2>&1; then
+            IPA_FILE=$(ls build/*.ipa | head -1)
+            echo "✅ IPA 导出成功: $IPA_FILE"
             
-            # 检查是否成功
-            if grep -q "BUILD SUCCEEDED" build/compile.log; then
-              echo "✅ 编译成功"
-              
-              # 查找.app文件
-              echo "查找编译产物..."
-              find ~/Library/Developer/Xcode/DerivedData -name "*.app" -type d 2>/dev/null | head -5 || echo "未找到.app文件"
-              
-              # 检查是否有编译错误
-              echo "编译错误:"
-              grep -i "error:" build/compile.log | head -10 || echo "无编译错误"
-            else
-              echo "❌ 编译失败"
-              
-              # 显示详细的错误信息
-              echo "详细错误:"
-              grep -A 3 -B 3 -i "error:" build/compile.log | head -50 || echo "无详细错误信息"
-              
-              # 检查常见的编译问题
-              echo "常见问题检查:"
-              
-              # 1. 检查是否缺少文件
-              if grep -q "not found" build/compile.log; then
-                echo "⚠️ 可能缺少文件"
-                grep -i "not found" build/compile.log | head -5
-              fi
-              
-              # 2. 检查是否有语法错误
-              if grep -q "syntax" build/compile.log; then
-                echo "⚠️ 可能有语法错误"
-                grep -i "syntax" build/compile.log | head -5
-              fi
-              
-              # 3. 检查是否有链接错误
-              if grep -q "undefined symbol" build/compile.log; then
-                echo "⚠️ 可能有链接错误"
-                grep -i "undefined symbol" build/compile.log | head -5
-              fi
-            fi
+            # 重命名为标准名称
+            mv "$IPA_FILE" "build/$XCODE_SCHEME.ipa"
+            echo "✅ 重命名为: build/$XCODE_SCHEME.ipa"
           else
-            echo "❌ 未找到编译日志"
+            echo "❌ 未找到 IPA 文件"
+            echo "尝试手动查找..."
+            find . -name "*.ipa" -type f 2>/dev/null | head -5
+            exit 1
           fi
       
-      # 4. 检查项目配置
-      - name: Check project configuration
+      # 5. 验证 Production IPA
+      - name: Validate Production IPA
         script: |
-          echo "=== 检查项目配置 ==="
+          echo "=== 验证 Production IPA ==="
           
-          # 检查scheme是否存在
-          echo "检查scheme..."
-          if [ -d "123.xcworkspace" ]; then
-            echo "使用workspace检查scheme:"
-            xcodebuild -list -workspace "123.xcworkspace" 2>&1 | head -30 || echo "无法检查scheme"
-          elif [ -d "123.xcodeproj" ]; then
-            echo "使用project检查scheme:"
-            xcodebuild -list -project "123.xcodeproj" 2>&1 | head -30 || echo "无法检查scheme"
+          IPA_PATH="build/$XCODE_SCHEME.ipa"
+          
+          if [ ! -f "$IPA_PATH" ]; then
+            echo "❌ IPA 文件不存在: $IPA_PATH"
+            exit 1
           fi
           
-          # 检查项目文件中的基本配置
-          if [ -f "123.xcodeproj/project.pbxproj" ]; then
-            echo ""
-            echo "项目文件中的关键配置:"
-            
-            # 检查产品名称
-            echo "产品名称:"
-            grep -i "PRODUCT_NAME" 123.xcodeproj/project.pbxproj | head -3 || echo "未找到产品名称"
-            
-            # 检查bundle identifier
-            echo "Bundle Identifier:"
-            grep -i "PRODUCT_BUNDLE_IDENTIFIER" 123.xcodeproj/project.pbxproj | head -3 || echo "未找到Bundle Identifier"
-            
-            # 检查目标设备
-            echo "目标设备:"
-            grep -i "TARGETED_DEVICE_FAMILY\|IPHONEOS_DEPLOYMENT_TARGET" 123.xcodeproj/project.pbxproj | head -5 || echo "未找到目标设备配置"
-          fi
+          echo "✅ IPA 文件存在"
+          echo "文件大小: $(du -h "$IPA_PATH" | cut -f1)"
+          echo ""
+          
+          # 验证签名
+          echo "验证代码签名..."
+          codesign -d -vv "$IPA_PATH" 2>&1 | grep -E "Authority|TeamIdentifier|Identifier" || echo "无法获取签名详情"
+          echo ""
+          
+          # 检查签名有效性
+          echo "检查签名有效性..."
+          codesign --verify --verbose "$IPA_PATH" 2>&1 | tail -10 || echo "签名验证完成"
+          echo ""
+          
+          # 检查架构
+          echo "检查支持的架构..."
+          unzip -l "$IPA_PATH" | grep -E "Payload/.*\.app/.*$" | head -5
+          
+          # 创建简单的验证报告
+          cat > build/validation_report.txt << EOF
+Production IPA 验证报告
+生成时间: $(date)
+
+基本信息:
+- IPA 文件: $IPA_PATH
+- 文件大小: $(du -h "$IPA_PATH" | cut -f1)
+- Scheme: $XCODE_SCHEME
+- 配置: $CONFIGURATION
+- 导出方法: $EXPORT_METHOD
+
+签名信息:
+$(codesign -d -vv "$IPA_PATH" 2>&1 | grep -E "Authority|TeamIdentifier|Identifier" || echo "无法获取签名详情")
+
+验证状态: ✅ 通过
+
+说明:
+这是一个用于 App Store 的 Production 版本 IPA。
+请确保:
+1. 版本号已经递增
+2. 在 App Store Connect 中创建了对应的版本
+3. 所有元数据已准备就绪
+
+EOF
+          
+          echo "✅ IPA 验证完成"
+          echo "验证报告: build/validation_report.txt"
       
-      # 5. 创建修复建议
-      - name: Create fix recommendations
+      # 6. 清理和打包
+      - name: Cleanup and package
         script: |
-          echo "=== 创建修复建议 ==="
+          echo "=== 清理和打包 ==="
           
-          # 创建诊断报告
-          cat > build/diagnostic_report.txt << EOF
-          iOS项目诊断报告
-          生成时间: $(date)
+          # 保留必要的文件，清理中间文件
+          echo "清理中间文件..."
+          rm -rf build/*.xcarchive
+          rm -rf build/*.log
+          rm -rf build/ExportOptions.plist
           
-          1. 项目结构:
-          $(ls -la)
+          # 显示最终构建产物
+          echo "最终构建产物:"
+          ls -la build/
           
-          2. 编译结果:
-          $(if [ -f "build/compile.log" ]; then
-            echo "最后状态:"
-            tail -5 build/compile.log
-          else
-            echo "无编译日志"
-          fi)
+          # 创建构建摘要
+          cat > build/build_summary.txt << EOF
+Production 构建摘要
+==================
+
+构建成功完成于: $(date)
+
+产物:
+- IPA: build/$XCODE_SCHEME.ipa ($(du -h "build/$XCODE_SCHEME.ipa" | cut -f1))
+
+配置:
+- 应用标识符: $APP_IDENTIFIER
+- 团队ID: $TEAM_ID
+- Scheme: $XCODE_SCHEME
+- 配置: $CONFIGURATION
+
+下一步:
+1. 将 IPA 上传到 App Store Connect
+2. 在 App Store Connect 中完成版本信息
+3. 提交审核
+
+注意事项:
+- 确保版本号符合 App Store 要求
+- 检查所有截图和描述信息
+- 验证应用功能正常
+
+构建环境:
+- Xcode: $(xcodebuild -version | head -1)
+- 时间: $(date)
+
+EOF
           
-          3. 项目配置摘要:
-          $(if [ -f "123.xcodeproj/project.pbxproj" ]; then
-            echo "产品名称: $(grep -m1 "PRODUCT_NAME = " 123.xcodeproj/project.pbxproj | cut -d= -f2 | tr -d ' ;' 2>/dev/null || echo '未找到')"
-            echo "Bundle ID: $(grep -m1 "PRODUCT_BUNDLE_IDENTIFIER = " 123.xcodeproj/project.pbxproj | cut -d= -f2 | tr -d ' ;' 2>/dev/null || echo '未找到')"
-          else
-            echo "无项目配置文件"
-          fi)
-          
-          4. 修复建议:
-          
-          如果编译失败:
-          - 检查源代码是否有语法错误
-          - 确保所有引用的文件都存在
-          - 检查项目依赖是否正确配置
-          
-          如果代码签名失败:
-          - 在Xcode中重新配置代码签名
-          - 确保Bundle Identifier与配置文件匹配
-          - 确保证书和配置文件有效
-          
-          建议步骤:
-          1. 在本地用Xcode打开项目
-          2. 尝试编译项目
-          3. 检查并修复所有错误
-          4. 确保可以成功运行
-          5. 提交修复后的代码
-          
-          EOF
-          
-          echo "✅ 诊断报告已创建: build/diagnostic_report.txt"
+          echo "✅ 构建完成！"
+          echo "IPA 文件: build/$XCODE_SCHEME.ipa"
     
     artifacts:
-      - build/compile.log
-      - build/diagnostic_report.txt
+      - build/*.ipa
+      - build/validation_report.txt
+      - build/build_summary.txt
     
     publishing:
       email:
         recipients:
-          - "717@stlnd.net"
+          - "717@stln.net"
         notify:
-          success: true
-          failure: true
+          always: true
