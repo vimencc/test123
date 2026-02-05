@@ -30,24 +30,28 @@ workflows:
         - ~/Library/Developer/Xcode/DerivedData
     
     scripts:
-      # 1. 设置环境
-      - name: Setup environment
+      # 1. 设置环境和验证
+      - name: Setup and verify
         script: |
-          echo "=== 设置环境 ==="
+          echo "=== 设置和验证 ==="
           echo "当前目录: $(pwd)"
-          echo "团队ID: $TEAM_ID"
-          echo "应用标识符: $APP_IDENTIFIER"
           echo "Scheme: $XCODE_SCHEME"
+          echo "Team ID: $TEAM_ID"
+          echo "Bundle ID: $APP_IDENTIFIER"
           
           # 显示项目结构
           echo "项目结构:"
           ls -la
           
-          # 检查workspace和project
+          # 验证项目文件
           if [ -d "123.xcworkspace" ]; then
             echo "✅ 使用workspace: 123.xcworkspace"
+            echo "检查workspace的scheme:"
+            xcodebuild -list -workspace "123.xcworkspace" 2>&1 | grep -A 20 "Schemes:" || echo "无法列出scheme"
           elif [ -d "123.xcodeproj" ]; then
             echo "✅ 使用project: 123.xcodeproj"
+            echo "检查project的scheme:"
+            xcodebuild -list -project "123.xcodeproj" 2>&1 | grep -A 20 "Schemes:" || echo "无法列出scheme"
           else
             echo "❌ 未找到项目文件"
             exit 1
@@ -56,30 +60,70 @@ workflows:
           # 创建构建目录
           mkdir -p build
       
-      # 2. 使用Codemagic的代码签名工具
-      - name: Setup code signing with Codemagic
+      # 2. 手动设置代码签名（不使用Codemagic特定工具）
+      - name: Manual code signing setup
         script: |
-          echo "=== 设置代码签名 ==="
+          echo "=== 手动设置代码签名 ==="
           
-          # 应用Codemagic中配置的代码签名证书和配置文件
-          xcode-project use-profiles
-          
-          # 显示可用的证书
+          # 显示可用证书
           echo "可用证书:"
           security find-identity -p codesigning -v
+          
+          # 创建临时钥匙串并导入证书（如果需要）
+          # 注意：这里假设证书已在系统钥匙串中，或由Codemagic自动配置
+          
+          echo "✅ 代码签名准备完成"
       
-      # 3. 构建archive
-      - name: Build archive
+      # 3. 修正项目文件中的配置问题
+      - name: Fix project configuration
         script: |
-          echo "=== 构建archive ==="
+          echo "=== 修正项目配置 ==="
+          
+          if [ -f "123.xcodeproj/project.pbxproj" ]; then
+            echo "备份项目文件..."
+            cp 123.xcodeproj/project.pbxproj 123.xcodeproj/project.pbxproj.backup
+            
+            # 确保有正确的开发团队设置
+            echo "检查并设置开发团队..."
+            if ! grep -q "DEVELOPMENT_TEAM = $TEAM_ID" 123.xcodeproj/project.pbxproj; then
+              echo "设置开发团队为: $TEAM_ID"
+              # 替换现有的DEVELOPMENT_TEAM设置，或添加新的
+              sed -i '' "s/DEVELOPMENT_TEAM = [^;]*;/DEVELOPMENT_TEAM = $TEAM_ID;/g" 123.xcodeproj/project.pbxproj 2>/dev/null || \
+              sed -i '' "/Begin PBXProject section/,/End PBXProject section/ s/attributes = {/attributes = { DEVELOPMENT_TEAM = $TEAM_ID;/" 123.xcodeproj/project.pbxproj
+            fi
+            
+            # 确保有正确的bundle identifier
+            echo "检查并设置bundle identifier..."
+            if ! grep -q "PRODUCT_BUNDLE_IDENTIFIER = $APP_IDENTIFIER" 123.xcodeproj/project.pbxproj; then
+              echo "设置bundle identifier为: $APP_IDENTIFIER"
+              sed -i '' "s/PRODUCT_BUNDLE_IDENTIFIER = [^;]*;/PRODUCT_BUNDLE_IDENTIFIER = $APP_IDENTIFIER;/g" 123.xcodeproj/project.pbxproj
+            fi
+            
+            # 移除可能导致问题的provisioning profile设置（让Xcode自动选择）
+            echo "移除固定的provisioning profile设置（使用自动选择）..."
+            sed -i '' '/PROVISIONING_PROFILE/d' 123.xcodeproj/project.pbxproj
+            sed -i '' '/PROVISIONING_PROFILE_SPECIFIER/d' 123.xcodeproj/project.pbxproj
+            
+            echo "✅ 项目配置修正完成"
+          else
+            echo "⚠️ 未找到项目配置文件，跳过配置修正"
+          fi
+      
+      # 4. 构建archive（使用自动代码签名）
+      - name: Build archive with auto signing
+        script: |
+          echo "=== 构建archive（自动代码签名）==="
           
           # 清理之前的构建
           rm -rf build/*.xcarchive
           
+          # 创建build目录
+          mkdir -p build
+          
           if [ -d "123.xcworkspace" ]; then
             echo "使用workspace构建..."
             
-            # 构建archive，使用自动签名
+            # 构建archive，使用自动代码签名
             xcodebuild archive \
               -workspace "123.xcworkspace" \
               -scheme "$XCODE_SCHEME" \
@@ -87,12 +131,13 @@ workflows:
               -archivePath "build/$XCODE_SCHEME.xcarchive" \
               -destination 'generic/platform=iOS' \
               -allowProvisioningUpdates \
+              CODE_SIGN_STYLE="Automatic" \
               2>&1 | tee build/archive.log
             
           elif [ -d "123.xcodeproj" ]; then
             echo "使用project构建..."
             
-            # 构建archive，使用自动签名
+            # 构建archive，使用自动代码签名
             xcodebuild archive \
               -project "123.xcodeproj" \
               -scheme "$XCODE_SCHEME" \
@@ -100,6 +145,7 @@ workflows:
               -archivePath "build/$XCODE_SCHEME.xcarchive" \
               -destination 'generic/platform=iOS' \
               -allowProvisioningUpdates \
+              CODE_SIGN_STYLE="Automatic" \
               2>&1 | tee build/archive.log
           fi
           
@@ -113,7 +159,7 @@ workflows:
             exit 1
           fi
       
-      # 4. 导出IPA
+      # 5. 导出IPA
       - name: Export IPA
         script: |
           echo "=== 导出IPA ==="
@@ -121,7 +167,7 @@ workflows:
           # 清理之前的IPA
           rm -rf build/*.ipa
           
-          # 创建export_options.plist
+          # 创建export_options.plist（使用app-store方法）
           cat > build/export_options.plist << EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -135,9 +181,17 @@ workflows:
               <false/>
               <key>compileBitcode</key>
               <false/>
+              <key>provisioningProfiles</key>
+              <dict>
+                  <key>$APP_IDENTIFIER</key>
+                  <string>codemagic_Production</string>
+              </dict>
           </dict>
           </plist>
           EOF
+          
+          echo "export_options.plist内容:"
+          cat build/export_options.plist
           
           # 执行导出
           xcodebuild -exportArchive \
@@ -149,7 +203,7 @@ workflows:
           
           echo "✅ 导出完成"
       
-      # 5. 验证和重命名IPA文件
+      # 6. 验证和重命名IPA文件
       - name: Verify and rename IPA
         script: |
           echo "=== 验证和重命名IPA文件 ==="
@@ -188,7 +242,7 @@ workflows:
             exit 1
           fi
       
-      # 6. 显示构建摘要
+      # 7. 显示构建摘要
       - name: Build summary
         script: |
           echo "=== 构建摘要 ==="
