@@ -5,7 +5,7 @@ workflows:
       xcode: latest  # 使用最新版本的 Xcode
       cocoapods: default  # 使用默认的 CocoaPods 版本
       vars:
-        BUNDLE_ID: "com.test.ios.attaf""  # 你的应用包标识符
+        BUNDLE_ID: "com.test.ios.attaf"  # 你的应用包标识符
         XCODE_WORKSPACE: "123.xcworkspace"  # 你的 Xcode 工作空间文件
         XCODE_SCHEME: "123"  # 你的 Xcode 方案
         APP_STORE_CONNECT_ISSUER_ID: $APP_STORE_CONNECT_ISSUER_ID  # 从环境变量中获取 App Store Connect 的 Issuer ID
