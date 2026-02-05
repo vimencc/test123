@@ -27,14 +27,48 @@ workflows:
           
           echo "构建完成!"
           
-          # 显示当前目录结构
-          echo "当前目录结构:"
-          find . -name "*.ipa" -o -name "*.xcarchive" | head -20
+          # 显示构建产物位置
+          echo "=== 构建产物 ==="
+          echo "检查默认输出目录:"
+          ls -la build/ios/ipa/ 2>/dev/null || echo "build/ios/ipa/ 目录不存在"
+          
+          echo "=== 搜索所有IPA文件 ==="
+          find . -name "*.ipa" -type f 2>/dev/null | while read file; do
+            echo "找到IPA: $file"
+            echo "文件大小: $(du -h "$file" | cut -f1)"
+          done
+          
+          echo "=== 当前目录结构 ==="
+          ls -la
+      
+      - name: 验证和准备发布
+        script: |
+          echo "=== 验证构建 ==="
+          
+          # 确保IPA文件存在
+          IPA_FILE=$(find . -name "*.ipa" -type f | head -1)
+          
+          if [ -n "$IPA_FILE" ]; then
+            echo "✅ 找到IPA文件: $IPA_FILE"
+            
+            # 获取IPA信息
+            echo "IPA信息:"
+            xcode-project ipa-info --ipa "$IPA_FILE" || echo "无法获取详细IPA信息"
+            
+            # 复制到标准位置（如果需要）
+            mkdir -p output/ios
+            cp "$IPA_FILE" output/ios/
+            echo "IPA已复制到 output/ios/"
+          else
+            echo "❌ 未找到IPA文件，请检查构建日志"
+            exit 1
+          fi
     
-    # 收集所有可能的IPA文件
+    # 收集构建产物
     artifacts:
-      - "**/*.ipa"
-      - "build/ios/ipa/*"
+      - output/ios/*.ipa
+      - build/ios/ipa/*.ipa  # 保留原始位置
+      - build/ios/ipa/*.dSYM.zip  # 调试符号
     
     publishing:
       app_store_connect:
@@ -42,3 +76,18 @@ workflows:
         key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
         issuer_id: $APP_STORE_CONNECT_ISSUER_ID
         submit_to_testflight: true
+        
+        # 可选：发布到特定测试组
+        # beta_groups:
+        #   - "Internal Testers"
+        
+        # 可选：自动过期旧构建
+        # expire_build_submitted_for_testing: true
+      
+      # 邮件通知（可选）
+      email:
+        recipients:
+          - 717@stlnd.com
+        notify:
+          success: true
+          failure: true
