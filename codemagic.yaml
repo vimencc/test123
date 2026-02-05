@@ -6,13 +6,17 @@ workflows:
     environment:
       xcode: latest
       groups:
-        - appstore_connect  # 仅保留App Store Connect API密钥组
+        - appstore_connect
       vars:
         # 基础配置
         APP_IDENTIFIER: "com.test.ios.attaf"
         APPLE_ID: "lingya00130@gmail.com"
         TEAM_ID: "7994453ZHZ"
         XCODE_SCHEME: "123"
+        
+        # 代码签名配置
+        CODE_SIGN_IDENTITY: "Apple Distribution"
+        PROVISIONING_PROFILE_NAME: "codemagic_Production"
     
     triggering:
       events:
@@ -30,56 +34,173 @@ workflows:
         - ~/Library/Developer/Xcode/DerivedData
     
     scripts:
-      # 1. 设置环境和检查证书
-      - name: Setup environment and check certificates
+      # 1. 设置环境和显示项目配置
+      - name: Setup environment
         script: |
-          echo "=== 设置环境和检查证书 ==="
+          echo "=== 设置环境 ==="
           echo "当前目录: $(pwd)"
           echo "Scheme: $XCODE_SCHEME"
           echo "Team ID: $TEAM_ID"
           echo "Bundle ID: $APP_IDENTIFIER"
+          echo "代码签名身份: $CODE_SIGN_IDENTITY"
+          echo "配置文件: $PROVISIONING_PROFILE_NAME"
           
           # 显示项目结构
           echo "项目结构:"
           ls -la
           
-          # 检查钥匙串
-          echo "检查钥匙串..."
-          security list-keychains
-          
-          # 检查所有可用证书
-          echo "检查所有证书:"
-          security find-identity -p codesigning -v
+          # 显示项目文件内容
+          if [ -f "123.xcodeproj/project.pbxproj" ]; then
+            echo "项目文件大小: $(wc -l < 123.xcodeproj/project.pbxproj) 行"
+            echo "检查项目配置中的签名设置:"
+            grep -n -A 2 -B 2 "DEVELOPMENT_TEAM\|CODE_SIGN\|PROVISIONING" 123.xcodeproj/project.pbxproj | head -50 || echo "未找到相关设置"
+          fi
           
           # 创建构建目录
           mkdir -p build
       
-      # 2. 使用Codemagic工具设置代码签名
-      - name: Use Codemagic code signing tools
+      # 2. 使用Python脚本修复项目文件（更可靠的方法）
+      - name: Fix project configuration with Python
         script: |
-          echo "=== 使用Codemagic代码签名工具 ==="
+          echo "=== 使用Python修复项目配置 ==="
           
-          # 使用Codemagic的代码签名工具
-          echo "应用代码签名配置..."
-          xcode-project use-profiles
+          if [ -f "123.xcodeproj/project.pbxproj" ]; then
+            echo "备份项目文件..."
+            cp 123.xcodeproj/project.pbxproj 123.xcodeproj/project.pbxproj.backup
+            
+            # 创建Python脚本来修复项目文件
+            cat > fix_project.py << EOF
+          #!/usr/bin/env python3
+          import re
+          import sys
           
-          # 再次检查证书
-          echo "应用后检查证书:"
-          security find-identity -p codesigning -v
+          # 读取项目文件
+          with open('123.xcodeproj/project.pbxproj', 'r') as f:
+              content = f.read()
           
-          # 显示已安装的配置文件
-          echo "已安装的配置文件:"
-          ls -la ~/Library/MobileDevice/Provisioning\ Profiles/ 2>/dev/null | head -10 || echo "无配置文件"
+          print("原始文件大小:", len(content), "字符")
+          
+          # 1. 确保有DEVELOPMENT_TEAM设置
+          if 'DEVELOPMENT_TEAM = ' not in content:
+              print("添加DEVELOPMENT_TEAM设置...")
+              # 在适当的位置添加DEVELOPMENT_TEAM
+              content = re.sub(
+                  r'(\s+attributes = \{[\s\S]*?)(\s+\};)',
+                  lambda m: m.group(1) + f'\n\t\t\tDEVELOPMENT_TEAM = {sys.argv[1]};' + m.group(2),
+                  content
+              )
+          else:
+              print("更新DEVELOPMENT_TEAM设置...")
+              content = re.sub(
+                  r'DEVELOPMENT_TEAM = [^;]+;',
+                  f'DEVELOPMENT_TEAM = {sys.argv[1]};',
+                  content
+              )
+          
+          # 2. 确保有PRODUCT_BUNDLE_IDENTIFIER设置
+          if 'PRODUCT_BUNDLE_IDENTIFIER = ' not in content:
+              print("添加PRODUCT_BUNDLE_IDENTIFIER设置...")
+              # 在Build Settings中添加
+              content = re.sub(
+                  r'(\s+buildSettings = \{[\s\S]*?)(\s+\};)',
+                  lambda m: m.group(1) + f'\n\t\t\tPRODUCT_BUNDLE_IDENTIFIER = {sys.argv[2]};' + m.group(2),
+                  content,
+                  count=1
+              )
+          else:
+              print("更新PRODUCT_BUNDLE_IDENTIFIER设置...")
+              content = re.sub(
+                  r'PRODUCT_BUNDLE_IDENTIFIER = [^;]+;',
+                  f'PRODUCT_BUNDLE_IDENTIFIER = {sys.argv[2]};',
+                  content
+              )
+          
+          # 3. 设置CODE_SIGN_STYLE为Manual
+          if 'CODE_SIGN_STYLE = ' not in content:
+              print("添加CODE_SIGN_STYLE设置...")
+              content = re.sub(
+                  r'(\s+buildSettings = \{[\s\S]*?)(\s+\};)',
+                  lambda m: m.group(1) + f'\n\t\t\tCODE_SIGN_STYLE = Manual;' + m.group(2),
+                  content,
+                  count=1
+              )
+          else:
+              print("更新CODE_SIGN_STYLE为Manual...")
+              content = re.sub(
+                  r'CODE_SIGN_STYLE = [^;]+;',
+                  'CODE_SIGN_STYLE = Manual;',
+                  content
+              )
+          
+          # 4. 设置CODE_SIGN_IDENTITY
+          print("设置CODE_SIGN_IDENTITY...")
+          content = re.sub(
+              r'CODE_SIGN_IDENTITY = [^;]+;',
+              f'CODE_SIGN_IDENTITY = {sys.argv[3]};',
+              content
+          )
+          if 'CODE_SIGN_IDENTITY = ' not in content:
+              content = re.sub(
+                  r'(\s+buildSettings = \{[\s\S]*?)(\s+\};)',
+                  lambda m: m.group(1) + f'\n\t\t\tCODE_SIGN_IDENTITY = {sys.argv[3]};' + m.group(2),
+                  content,
+                  count=1
+              )
+          
+          # 5. 设置PROVISIONING_PROFILE_SPECIFIER
+          print("设置PROVISIONING_PROFILE_SPECIFIER...")
+          content = re.sub(
+              r'PROVISIONING_PROFILE_SPECIFIER = [^;]+;',
+              f'PROVISIONING_PROFILE_SPECIFIER = {sys.argv[4]};',
+              content
+          )
+          if 'PROVISIONING_PROFILE_SPECIFIER = ' not in content:
+              content = re.sub(
+                  r'(\s+buildSettings = \{[\s\S]*?)(\s+\};)',
+                  lambda m: m.group(1) + f'\n\t\t\tPROVISIONING_PROFILE_SPECIFIER = {sys.argv[4]};' + m.group(2),
+                  content,
+                  count=1
+              )
+          
+          # 写入修复后的文件
+          with open('123.xcodeproj/project.pbxproj', 'w') as f:
+              f.write(content)
+          
+          print("✅ 项目文件修复完成")
+          print("修复后的文件大小:", len(content), "字符")
+          EOF
+            
+            # 运行Python脚本修复项目文件
+            python3 fix_project.py "$TEAM_ID" "$APP_IDENTIFIER" "$CODE_SIGN_IDENTITY" "$PROVISIONING_PROFILE_NAME"
+            
+            echo "验证修复结果:"
+            echo "DEVELOPMENT_TEAM:"
+            grep -n "DEVELOPMENT_TEAM = " 123.xcodeproj/project.pbxproj || echo "未找到"
+            echo "PRODUCT_BUNDLE_IDENTIFIER:"
+            grep -n "PRODUCT_BUNDLE_IDENTIFIER = " 123.xcodeproj/project.pbxproj || echo "未找到"
+            echo "CODE_SIGN_STYLE:"
+            grep -n "CODE_SIGN_STYLE = " 123.xcodeproj/project.pbxproj || echo "未找到"
+            echo "CODE_SIGN_IDENTITY:"
+            grep -n "CODE_SIGN_IDENTITY = " 123.xcodeproj/project.pbxproj || echo "未找到"
+            echo "PROVISIONING_PROFILE_SPECIFIER:"
+            grep -n "PROVISIONING_PROFILE_SPECIFIER = " 123.xcodeproj/project.pbxproj || echo "未找到"
+          else
+            echo "❌ 未找到项目配置文件"
+          fi
       
-      # 3. 构建archive（让Xcode自动处理签名）
-      - name: Build archive with auto signing
+      # 3. 构建archive（使用修复后的配置）
+      - name: Build archive with fixed configuration
         script: |
-          echo "=== 构建archive（让Xcode自动处理签名）==="
+          echo "=== 构建archive（使用修复后的配置）==="
           
           # 清理之前的构建
           rm -rf build/*.xcarchive
           
-          # 构建archive，不指定签名参数，让Xcode自动处理
+          # 使用Codemagic代码签名工具
+          echo "应用Codemagic代码签名配置..."
+          xcode-project use-profiles 2>&1 | head -20 || echo "xcode-project use-profiles 执行完成"
+          
+          # 构建archive，使用项目文件中的配置
           echo "构建archive..."
           if [ -d "123.xcworkspace" ]; then
             echo "使用workspace构建..."
@@ -150,6 +271,13 @@ workflows:
               <false/>
               <key>compileBitcode</key>
               <false/>
+              <key>provisioningProfiles</key>
+              <dict>
+                  <key>$APP_IDENTIFIER</key>
+                  <string>$PROVISIONING_PROFILE_NAME</string>
+              </dict>
+              <key>signingCertificate</key>
+              <string>$CODE_SIGN_IDENTITY</string>
           </dict>
           </plist>
           EOF
