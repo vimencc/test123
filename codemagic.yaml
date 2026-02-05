@@ -13,10 +13,6 @@ workflows:
         APPLE_ID: "lingya00130@gmail.com"
         TEAM_ID: "7994453ZHZ"
         XCODE_SCHEME: "123"
-        
-        # 代码签名配置
-        CODE_SIGN_IDENTITY: "Apple Distribution"
-        PROVISIONING_PROFILE_NAME: "codemagic_Production"
     
     triggering:
       events:
@@ -32,310 +28,186 @@ workflows:
       cache_paths:
         - ~/Library/Caches/CocoaPods
         - ~/Library/Developer/Xcode/DerivedData
+        - vendor/bundle
     
     scripts:
-      # 1. 设置环境和显示项目配置
-      - name: Setup environment
+      # 1. 恢复项目文件备份（如果存在）
+      - name: Restore project from backup
         script: |
-          echo "=== 设置环境 ==="
-          echo "当前目录: $(pwd)"
-          echo "Scheme: $XCODE_SCHEME"
-          echo "Team ID: $TEAM_ID"
-          echo "Bundle ID: $APP_IDENTIFIER"
-          echo "代码签名身份: $CODE_SIGN_IDENTITY"
-          echo "配置文件: $PROVISIONING_PROFILE_NAME"
+          echo "=== 恢复项目文件 ==="
           
-          # 显示项目结构
-          echo "项目结构:"
-          ls -la
+          if [ -f "123.xcodeproj/project.pbxproj.backup" ]; then
+            echo "恢复项目文件备份..."
+            cp 123.xcodeproj/project.pbxproj.backup 123.xcodeproj/project.pbxproj
+            echo "✅ 项目文件已从备份恢复"
+          else
+            echo "⚠️ 未找到项目文件备份"
+            # 从git恢复原始文件
+            echo "尝试从git恢复项目文件..."
+            git checkout HEAD -- 123.xcodeproj/project.pbxproj 2>/dev/null || echo "无法从git恢复"
+          fi
           
-          # 显示项目文件内容
-          if [ -f "123.xcodeproj/project.pbxproj" ]; then
-            echo "项目文件大小: $(wc -l < 123.xcodeproj/project.pbxproj) 行"
-            echo "检查项目配置中的签名设置:"
-            grep -n -A 2 -B 2 "DEVELOPMENT_TEAM\|CODE_SIGN\|PROVISIONING" 123.xcodeproj/project.pbxproj | head -50 || echo "未找到相关设置"
+          # 验证项目文件
+          echo "验证项目文件格式..."
+          if plutil -lint 123.xcodeproj/project.pbxproj 2>/dev/null; then
+            echo "✅ 项目文件格式有效"
+          else
+            echo "❌ 项目文件格式无效"
+            echo "尝试修复项目文件..."
+            plutil -convert xml1 123.xcodeproj/project.pbxproj 2>/dev/null || echo "无法修复项目文件"
           fi
           
           # 创建构建目录
           mkdir -p build
       
-      # 2. 使用Python脚本修复项目文件（更可靠的方法）
-      - name: Fix project configuration with Python
+      # 2. 使用fastlane构建（它会自动处理代码签名）
+      - name: Setup and run fastlane
         script: |
-          echo "=== 使用Python修复项目配置 ==="
+          echo "=== 使用fastlane构建 ==="
           
-          if [ -f "123.xcodeproj/project.pbxproj" ]; then
-            echo "备份项目文件..."
-            cp 123.xcodeproj/project.pbxproj 123.xcodeproj/project.pbxproj.backup
-            
-            # 创建Python脚本来修复项目文件
-            cat > fix_project.py << EOF
-          #!/usr/bin/env python3
-          import re
-          import sys
+          # 安装fastlane
+          echo "安装fastlane..."
+          sudo gem install fastlane -NV
           
-          # 读取项目文件
-          with open('123.xcodeproj/project.pbxproj', 'r') as f:
-              content = f.read()
+          # 创建fastlane目录
+          mkdir -p fastlane
           
-          print("原始文件大小:", len(content), "字符")
+          # 创建Appfile
+          cat > fastlane/Appfile << EOF
+          # 应用标识符
+          app_identifier "$APP_IDENTIFIER"
           
-          # 1. 确保有DEVELOPMENT_TEAM设置
-          if 'DEVELOPMENT_TEAM = ' not in content:
-              print("添加DEVELOPMENT_TEAM设置...")
-              # 在适当的位置添加DEVELOPMENT_TEAM
-              content = re.sub(
-                  r'(\s+attributes = \{[\s\S]*?)(\s+\};)',
-                  lambda m: m.group(1) + f'\n\t\t\tDEVELOPMENT_TEAM = {sys.argv[1]};' + m.group(2),
-                  content
-              )
-          else:
-              print("更新DEVELOPMENT_TEAM设置...")
-              content = re.sub(
-                  r'DEVELOPMENT_TEAM = [^;]+;',
-                  f'DEVELOPMENT_TEAM = {sys.argv[1]};',
-                  content
-              )
+          # Apple ID
+          apple_id "$APPLE_ID"
           
-          # 2. 确保有PRODUCT_BUNDLE_IDENTIFIER设置
-          if 'PRODUCT_BUNDLE_IDENTIFIER = ' not in content:
-              print("添加PRODUCT_BUNDLE_IDENTIFIER设置...")
-              # 在Build Settings中添加
-              content = re.sub(
-                  r'(\s+buildSettings = \{[\s\S]*?)(\s+\};)',
-                  lambda m: m.group(1) + f'\n\t\t\tPRODUCT_BUNDLE_IDENTIFIER = {sys.argv[2]};' + m.group(2),
-                  content,
-                  count=1
-              )
-          else:
-              print("更新PRODUCT_BUNDLE_IDENTIFIER设置...")
-              content = re.sub(
-                  r'PRODUCT_BUNDLE_IDENTIFIER = [^;]+;',
-                  f'PRODUCT_BUNDLE_IDENTIFIER = {sys.argv[2]};',
-                  content
-              )
+          # 团队ID
+          team_id "$TEAM_ID"
           
-          # 3. 设置CODE_SIGN_STYLE为Manual
-          if 'CODE_SIGN_STYLE = ' not in content:
-              print("添加CODE_SIGN_STYLE设置...")
-              content = re.sub(
-                  r'(\s+buildSettings = \{[\s\S]*?)(\s+\};)',
-                  lambda m: m.group(1) + f'\n\t\t\tCODE_SIGN_STYLE = Manual;' + m.group(2),
-                  content,
-                  count=1
-              )
-          else:
-              print("更新CODE_SIGN_STYLE为Manual...")
-              content = re.sub(
-                  r'CODE_SIGN_STYLE = [^;]+;',
-                  'CODE_SIGN_STYLE = Manual;',
-                  content
-              )
-          
-          # 4. 设置CODE_SIGN_IDENTITY
-          print("设置CODE_SIGN_IDENTITY...")
-          content = re.sub(
-              r'CODE_SIGN_IDENTITY = [^;]+;',
-              f'CODE_SIGN_IDENTITY = {sys.argv[3]};',
-              content
-          )
-          if 'CODE_SIGN_IDENTITY = ' not in content:
-              content = re.sub(
-                  r'(\s+buildSettings = \{[\s\S]*?)(\s+\};)',
-                  lambda m: m.group(1) + f'\n\t\t\tCODE_SIGN_IDENTITY = {sys.argv[3]};' + m.group(2),
-                  content,
-                  count=1
-              )
-          
-          # 5. 设置PROVISIONING_PROFILE_SPECIFIER
-          print("设置PROVISIONING_PROFILE_SPECIFIER...")
-          content = re.sub(
-              r'PROVISIONING_PROFILE_SPECIFIER = [^;]+;',
-              f'PROVISIONING_PROFILE_SPECIFIER = {sys.argv[4]};',
-              content
-          )
-          if 'PROVISIONING_PROFILE_SPECIFIER = ' not in content:
-              content = re.sub(
-                  r'(\s+buildSettings = \{[\s\S]*?)(\s+\};)',
-                  lambda m: m.group(1) + f'\n\t\t\tPROVISIONING_PROFILE_SPECIFIER = {sys.argv[4]};' + m.group(2),
-                  content,
-                  count=1
-              )
-          
-          # 写入修复后的文件
-          with open('123.xcodeproj/project.pbxproj', 'w') as f:
-              f.write(content)
-          
-          print("✅ 项目文件修复完成")
-          print("修复后的文件大小:", len(content), "字符")
-          EOF
-            
-            # 运行Python脚本修复项目文件
-            python3 fix_project.py "$TEAM_ID" "$APP_IDENTIFIER" "$CODE_SIGN_IDENTITY" "$PROVISIONING_PROFILE_NAME"
-            
-            echo "验证修复结果:"
-            echo "DEVELOPMENT_TEAM:"
-            grep -n "DEVELOPMENT_TEAM = " 123.xcodeproj/project.pbxproj || echo "未找到"
-            echo "PRODUCT_BUNDLE_IDENTIFIER:"
-            grep -n "PRODUCT_BUNDLE_IDENTIFIER = " 123.xcodeproj/project.pbxproj || echo "未找到"
-            echo "CODE_SIGN_STYLE:"
-            grep -n "CODE_SIGN_STYLE = " 123.xcodeproj/project.pbxproj || echo "未找到"
-            echo "CODE_SIGN_IDENTITY:"
-            grep -n "CODE_SIGN_IDENTITY = " 123.xcodeproj/project.pbxproj || echo "未找到"
-            echo "PROVISIONING_PROFILE_SPECIFIER:"
-            grep -n "PROVISIONING_PROFILE_SPECIFIER = " 123.xcodeproj/project.pbxproj || echo "未找到"
-          else
-            echo "❌ 未找到项目配置文件"
-          fi
-      
-      # 3. 构建archive（使用修复后的配置）
-      - name: Build archive with fixed configuration
-        script: |
-          echo "=== 构建archive（使用修复后的配置）==="
-          
-          # 清理之前的构建
-          rm -rf build/*.xcarchive
-          
-          # 使用Codemagic代码签名工具
-          echo "应用Codemagic代码签名配置..."
-          xcode-project use-profiles 2>&1 | head -20 || echo "xcode-project use-profiles 执行完成"
-          
-          # 构建archive，使用项目文件中的配置
-          echo "构建archive..."
-          if [ -d "123.xcworkspace" ]; then
-            echo "使用workspace构建..."
-            
-            xcodebuild archive \
-              -workspace "123.xcworkspace" \
-              -scheme "$XCODE_SCHEME" \
-              -configuration Release \
-              -archivePath "build/$XCODE_SCHEME.xcarchive" \
-              -destination 'generic/platform=iOS' \
-              -allowProvisioningUpdates \
-              2>&1 | tee build/archive.log
-            
-          elif [ -d "123.xcodeproj" ]; then
-            echo "使用project构建..."
-            
-            xcodebuild archive \
-              -project "123.xcodeproj" \
-              -scheme "$XCODE_SCHEME" \
-              -configuration Release \
-              -archivePath "build/$XCODE_SCHEME.xcarchive" \
-              -destination 'generic/platform=iOS' \
-              -allowProvisioningUpdates \
-              2>&1 | tee build/archive.log
-          fi
-          
-          # 检查archive是否成功
-          if [ -d "build/$XCODE_SCHEME.xcarchive" ]; then
-            echo "✅ archive构建成功"
-            
-            # 显示archive中的app签名信息
-            echo "检查archive中的签名..."
-            APP_PATH="build/$XCODE_SCHEME.xcarchive/Products/Applications/$XCODE_SCHEME.app"
-            if [ -d "$APP_PATH" ]; then
-              echo "应用签名信息:"
-              codesign -d -vvv "$APP_PATH" 2>&1 | grep -E "Authority|TeamIdentifier|Identifier" || echo "无法获取签名详情"
-            else
-              echo "⚠️ 未找到.app文件"
-              echo "Archive内容:"
-              find "build/$XCODE_SCHEME.xcarchive" -type f -name "*.app" 2>/dev/null || echo "无.app文件"
-            fi
-          else
-            echo "❌ archive构建失败"
-            echo "查看日志最后100行:"
-            tail -100 build/archive.log
-            exit 1
-          fi
-      
-      # 4. 导出IPA
-      - name: Export IPA
-        script: |
-          echo "=== 导出IPA ==="
-          
-          # 清理之前的IPA
-          rm -rf build/*.ipa
-          
-          # 创建export_options.plist
-          cat > build/export_options.plist << EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>method</key>
-              <string>app-store</string>
-              <key>teamID</key>
-              <string>$TEAM_ID</string>
-              <key>uploadBitcode</key>
-              <false/>
-              <key>compileBitcode</key>
-              <false/>
-              <key>provisioningProfiles</key>
-              <dict>
-                  <key>$APP_IDENTIFIER</key>
-                  <string>$PROVISIONING_PROFILE_NAME</string>
-              </dict>
-              <key>signingCertificate</key>
-              <string>$CODE_SIGN_IDENTITY</string>
-          </dict>
-          </plist>
+          # iTunes Connect团队
+          itc_team_id "$TEAM_ID"
           EOF
           
-          echo "export_options.plist内容:"
-          cat build/export_options.plist
+          # 创建Fastfile
+          cat > fastlane/Fastfile << EOF
+          default_platform(:ios)
           
-          # 执行导出
-          echo "开始导出IPA..."
-          xcodebuild -exportArchive \
-            -archivePath "build/$XCODE_SCHEME.xcarchive" \
-            -exportOptionsPlist "build/export_options.plist" \
-            -exportPath "build" \
-            -allowProvisioningUpdates \
-            2>&1 | tee build/export.log
+          platform :ios do
+            lane :release do
+              # 构建IPA
+              gym(
+                # 项目配置
+                workspace: "123.xcworkspace",
+                scheme: "$XCODE_SCHEME",
+                configuration: "Release",
+                
+                # 输出配置
+                output_directory: "../build",
+                output_name: "$XCODE_SCHEME.ipa",
+                
+                # 导出配置
+                export_method: "app-store",
+                export_options: {
+                  uploadBitcode: false,
+                  compileBitcode: false
+                },
+                
+                # 其他选项
+                clean: true,
+                silent: false,
+                skip_package_ipa: false,
+                include_symbols: true,
+                include_bitcode: false,
+                
+                # 代码签名配置 - 让fastlane自动处理
+                export_xcargs: "-allowProvisioningUpdates"
+              )
+              
+              # 验证构建
+              verify_build(
+                app_identifier: "$APP_IDENTIFIER"
+              )
+            end
+            
+            # 调试用的lane
+            lane :debug_build do
+              # 测试构建
+              gym(
+                workspace: "123.xcworkspace",
+                scheme: "$XCODE_SCHEME",
+                configuration: "Debug",
+                export_method: "development",
+                output_directory: "../build",
+                output_name: "$XCODE_SCHEME-debug.ipa",
+                clean: true
+              )
+            end
+          end
+          EOF
           
-          echo "✅ 导出完成"
+          echo "✅ fastlane配置创建完成"
       
-      # 5. 验证和重命名IPA文件
-      - name: Verify and rename IPA
+      # 3. 运行fastlane构建
+      - name: Run fastlane build
         script: |
-          echo "=== 验证和重命名IPA文件 ==="
+          echo "=== 运行fastlane构建 ==="
           
-          # 查找生成的IPA文件
-          echo "查找IPA文件..."
-          IPA_FILES=$(find build -name "*.ipa" 2>/dev/null)
+          # 进入fastlane目录
+          cd fastlane
           
-          if [ -z "$IPA_FILES" ]; then
-            echo "❌ 未找到IPA文件"
-            echo "导出日志最后100行:"
-            tail -100 build/export.log || echo "无导出日志"
-            exit 1
-          fi
+          # 先尝试调试构建（更容易成功）
+          echo "尝试调试构建..."
+          fastlane ios debug_build || echo "调试构建失败，继续..."
           
-          echo "找到的IPA文件:"
-          echo "$IPA_FILES"
+          # 运行发布构建
+          echo "运行发布构建..."
+          fastlane ios release
           
-          # 如果IPA文件不在根目录，移动到根目录
-          if [ ! -f "build/$XCODE_SCHEME.ipa" ]; then
-            FIRST_IPA=$(echo "$IPA_FILES" | head -1)
-            echo "将IPA文件复制到标准位置: $FIRST_IPA -> build/$XCODE_SCHEME.ipa"
-            cp "$FIRST_IPA" "build/$XCODE_SCHEME.ipa"
-          fi
+          # 返回项目根目录
+          cd ..
           
-          # 验证IPA文件
-          if [ -f "build/$XCODE_SCHEME.ipa" ]; then
-            echo "✅ IPA文件创建成功: build/$XCODE_SCHEME.ipa"
-            echo "文件大小: $(du -h "build/$XCODE_SCHEME.ipa" | cut -f1)"
+          echo "✅ fastlane构建完成"
+      
+      # 4. 验证构建产物
+      - name: Verify artifacts
+        script: |
+          echo "=== 验证构建产物 ==="
+          
+          # 查找所有IPA文件
+          echo "搜索IPA文件..."
+          find . -name "*.ipa" -type f 2>/dev/null | while read ipa; do
+            echo "找到IPA: $ipa"
+            ls -la "$ipa"
+          done
+          
+          # 检查预期的IPA
+          EXPECTED_IPA="build/$XCODE_SCHEME.ipa"
+          if [ -f "$EXPECTED_IPA" ]; then
+            echo "✅ 找到预期的IPA: $EXPECTED_IPA"
+            echo "文件大小: $(du -h "$EXPECTED_IPA" | cut -f1)"
             
             # 验证签名
             echo "验证IPA签名..."
-            codesign -d -vvv "build/$XCODE_SCHEME.ipa" 2>&1 | head -20 || echo "无法验证IPA签名"
+            codesign -d -vvv "$EXPECTED_IPA" 2>&1 | grep -E "Authority|TeamIdentifier|Identifier" || echo "无法验证签名详情"
           else
-            echo "❌ IPA文件未创建"
-            exit 1
+            echo "❌ 未找到预期的IPA: $EXPECTED_IPA"
+            echo "build目录内容:"
+            ls -la build/ 2>/dev/null || echo "build目录不存在"
+            
+            # 尝试查找任何IPA
+            ANY_IPA=$(find . -name "*.ipa" -type f | head -1)
+            if [ -n "$ANY_IPA" ]; then
+              echo "⚠️ 找到其他位置的IPA: $ANY_IPA"
+              echo "复制到build目录..."
+              mkdir -p build
+              cp "$ANY_IPA" "$EXPECTED_IPA"
+              echo "✅ 已复制到: $EXPECTED_IPA"
+            else
+              echo "❌ 未找到任何IPA文件"
+              exit 1
+            fi
           fi
       
-      # 6. 显示构建摘要
+      # 5. 显示构建摘要
       - name: Build summary
         script: |
           echo "=== 构建摘要 ==="
@@ -343,20 +215,16 @@ workflows:
           echo ""
           echo "生成的产物:"
           echo "IPA: build/$XCODE_SCHEME.ipa"
-          echo "Archive: build/$XCODE_SCHEME.xcarchive"
           echo ""
           echo "文件大小:"
           du -h "build/$XCODE_SCHEME.ipa" 2>/dev/null || echo "IPA文件不存在"
-          du -h "build/$XCODE_SCHEME.xcarchive" 2>/dev/null || echo "Archive不存在"
           echo ""
           echo "构建完成时间: $(date)"
     
     artifacts:
       - build/*.ipa
-      - build/*.xcarchive
-      - build/export_options.plist
-      - build/archive.log
-      - build/export.log
+      - fastlane/Appfile
+      - fastlane/Fastfile
     
     publishing:
       # 邮件通知
