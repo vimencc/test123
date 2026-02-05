@@ -1,46 +1,102 @@
-# codemagic.yaml - 自动签名方案
+# codemagic.yaml - 使用 base64 编码的方案
 workflows:
-  ios-auto-sign:
-    name: iOS Auto Signing
+  ios-base64:
+    name: iOS Base64 Build
     environment:
       xcode: latest
-      # 只需要 Apple ID 密码，不需要证书文件
-      vars:
-        APPLE_ID: "lingya00130@gmail.com"
-        APPLE_ID_PASSWORD: "Lingya00"  # 在 Codemagic 中设置
+      groups:
+        - appstore_base64  # 新的组，包含 base64 编码的内容
     
     scripts:
-      - name: Build with automatic signing
+      - name: Decode certificates from base64
         script: |
-          echo "=== 使用自动签名构建 ==="
+          echo "=== Decoding certificates from base64 ==="
           
-          # 清理
+          # 检查变量是否存在
+          if [ -z "$CERTIFICATE_BASE64" ]; then
+            echo "❌ CERTIFICATE_BASE64 is not set"
+            echo "请按照以下步骤设置："
+            echo "1. 在本地运行: base64 -i certificate.p12 > cert_base64.txt"
+            echo "2. 复制 cert_base64.txt 的内容"
+            echo "3. 在 Codemagic 中创建变量 CERTIFICATE_BASE64"
+            echo "4. 将内容粘贴为值"
+            exit 1
+          fi
+          
+          if [ -z "$PROFILE_BASE64" ]; then
+            echo "❌ PROFILE_BASE64 is not set"
+            echo "请按照以下步骤设置："
+            echo "1. 在本地运行: base64 -i profile.mobileprovision > profile_base64.txt"
+            echo "2. 复制 profile_base64.txt 的内容"
+            echo "3. 在 Codemagic 中创建变量 PROFILE_BASE64"
+            echo "4. 将内容粘贴为值"
+            exit 1
+          fi
+          
+          if [ -z "$CERTIFICATE_PASSWORD" ]; then
+            echo "❌ CERTIFICATE_PASSWORD is not set"
+            exit 1
+          fi
+          
+          # 解码文件
+          echo "$CERTIFICATE_BASE64" | base64 -d > certificate.p12
+          echo "$PROFILE_BASE64" | base64 -d > profile.mobileprovision
+          
+          echo "✅ Files decoded"
+          echo "Certificate size: $(wc -c < certificate.p12) bytes"
+          echo "Profile size: $(wc -c < profile.mobileprovision) bytes"
+          
+          # 安装描述文件
+          PROFILES_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+          mkdir -p "$PROFILES_DIR"
+          cp profile.mobileprovision "$PROFILES_DIR/codemagic_Production.mobileprovision"
+          
+          # 安装证书
+          KEYCHAIN="build.keychain"
+          KEYCHAIN_PWD="build123"
+          
+          security delete-keychain "$HOME/Library/Keychains/$KEYCHAIN" 2>/dev/null || true
+          security create-keychain -p "$KEYCHAIN_PWD" "$HOME/Library/Keychains/$KEYCHAIN"
+          security default-keychain -s "$HOME/Library/Keychains/$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PWD" "$HOME/Library/Keychains/$KEYCHAIN"
+          
+          security import certificate.p12 \
+            -k "$HOME/Library/Keychains/$KEYCHAIN" \
+            -P "$CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+          
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PWD" "$HOME/Library/Keychains/$KEYCHAIN"
+          
+          echo "✅ Certificates installed"
+      
+      - name: Build iOS app
+        script: |
+          echo "=== Building iOS app ==="
+          
+          # 清理并创建构建目录
           rm -rf build 2>/dev/null || true
           mkdir -p build
           
-          echo "让 Xcode 自动处理签名..."
-          
-          # 使用自动签名
+          # 构建归档
           xcodebuild archive \
             -workspace "123.xcworkspace" \
             -scheme "123" \
             -configuration Release \
             -archivePath "build/App.xcarchive" \
-            -destination 'generic/platform=iOS' \
             -allowProvisioningUpdates \
-            CODE_SIGN_STYLE="Automatic"
+            CODE_SIGN_STYLE="Automatic" \
+            DEVELOPMENT_TEAM="7994453ZHZ"
           
-          # 检查归档
-          if [ -d "build/App.xcarchive" ]; then
-            echo "✅ 归档创建成功！"
-          else
-            echo "❌ 归档失败"
+          if [ ! -d "build/App.xcarchive" ]; then
+            echo "❌ Archive failed"
             exit 1
           fi
+          
+          echo "✅ Archive created"
       
       - name: Export IPA
         script: |
-          echo "=== 导出 IPA ==="
+          echo "=== Exporting IPA ==="
           
           # 导出
           xcodebuild -exportArchive \
@@ -53,6 +109,8 @@ workflows:
           <dict>
             <key>method</key>
             <string>app-store</string>
+            <key>teamID</key>
+            <string>7994453ZHZ</string>
           </dict>
           </plist>
           EOF
@@ -60,10 +118,10 @@ workflows:
             -allowProvisioningUpdates
           
           if ls build/*.ipa 1> /dev/null 2>&1; then
-            echo "✅ IPA 导出成功！"
+            echo "✅ IPA exported successfully!"
             ls -lh build/*.ipa
           else
-            echo "❌ IPA 导出失败"
+            echo "❌ IPA export failed"
             exit 1
           fi
     
