@@ -1,65 +1,40 @@
 workflows:
-  ios-correct:
-    name: iOS Correct Build
+  ios-minimal:
+    name: iOS Minimal
     environment:
       xcode: latest
-      cocoapods: default
       vars:
         BUNDLE_ID: "com.test.ios.attaf"
-        XCODE_SCHEME: "123"  # 替换为你的实际scheme名称
-      groups:
-        - ios_signing_credentials
+        XCODE_SCHEME: "123"
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: $BUNDLE_ID
     
     scripts:
       - name: 安装依赖
         script: |
-          if [ -f "Podfile" ]; then
-            pod install
-          elif [ -f "ios/Podfile" ]; then
-            cd ios
-            pod install
-          fi
+          # 如果有Podfile就安装
+          [ -f "Podfile" ] && pod install || echo "没有Podfile"
       
-      - name: 使用配置文件
+      - name: 构建
         script: |
-          echo "使用配置文件..."
-          xcode-project use-profiles
-      
-      - name: 构建IPA
-        script: |
-          echo "开始构建IPA..."
+          echo "构建IPA..."
           
-          # 查找workspace或project
-          WORKSPACE=$(find . -name "*.xcworkspace" -type d | head -1)
-          PROJECT=$(find . -name "*.xcodeproj" -type d | head -1)
+          # 最简单的命令
+          xcode-project build-ipa \
+            --workspace "123.xcworkspace" \
+            --scheme "$XCODE_SCHEME"
           
-          if [ -n "$WORKSPACE" ]; then
-            echo "使用workspace: $WORKSPACE"
-            
-            # 方法1: 使用xcode-project build-ipa命令（最简单）
-            # 注意：需要先设置正确的导出选项
-            xcode-project build-ipa \
-              --workspace "$WORKSPACE" \
-              --scheme "$XCODE_SCHEME" \
-              --output "build/ios/ipa"
-              
-          elif [ -n "$PROJECT" ]; then
-            echo "使用project: $PROJECT"
-            
-            xcode-project build-ipa \
-              --project "$PROJECT" \
-              --scheme "$XCODE_SCHEME" \
-              --output "build/ios/ipa"
-          else
-            echo "错误: 未找到Xcode项目文件"
-            exit 1
-          fi
+          echo "构建完成!"
           
-          echo "IPA构建完成!"
-          ls -la "build/ios/ipa/"
+          # 显示当前目录结构
+          echo "当前目录结构:"
+          find . -name "*.ipa" -o -name "*.xcarchive" | head -20
     
+    # 收集所有可能的IPA文件
     artifacts:
-      - build/ios/ipa/*.ipa
+      - "**/*.ipa"
+      - "build/ios/ipa/*"
     
     publishing:
       app_store_connect:
