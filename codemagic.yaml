@@ -1,17 +1,11 @@
 workflows:
-  ios-release:
-    name: iOS App Store Release
+  ios-diagnostic:
+    name: iOS Diagnostic Build
     max_build_duration: 120
     instance_type: mac_mini_m2
     environment:
       xcode: latest
-      groups:
-        - appstore_connect
       vars:
-        # 基础配置
-        APP_IDENTIFIER: "com.test.ios.attaf"
-        APPLE_ID: "lingya00130@gmail.com"
-        TEAM_ID: "7994453ZHZ"
         XCODE_SCHEME: "123"
     
     triggering:
@@ -20,227 +14,233 @@ workflows:
       branch_patterns:
         - pattern: 'main'
           include: true
-        - pattern: 'release/*'
-          include: true
       cancel_previous_builds: false
     
-    cache:
-      cache_paths:
-        - ~/Library/Caches/CocoaPods
-        - ~/Library/Developer/Xcode/DerivedData
-        - vendor/bundle
-    
     scripts:
-      # 1. 恢复项目文件备份（如果存在）
-      - name: Restore project from backup
+      # 1. 恢复原始项目文件
+      - name: Restore original project
         script: |
-          echo "=== 恢复项目文件 ==="
+          echo "=== 恢复原始项目文件 ==="
           
-          if [ -f "123.xcodeproj/project.pbxproj.backup" ]; then
-            echo "恢复项目文件备份..."
-            cp 123.xcodeproj/project.pbxproj.backup 123.xcodeproj/project.pbxproj
-            echo "✅ 项目文件已从备份恢复"
-          else
-            echo "⚠️ 未找到项目文件备份"
-            # 从git恢复原始文件
-            echo "尝试从git恢复项目文件..."
-            git checkout HEAD -- 123.xcodeproj/project.pbxproj 2>/dev/null || echo "无法从git恢复"
-          fi
+          # 从git恢复所有文件
+          echo "从git恢复项目文件..."
+          git reset --hard HEAD
+          git clean -fd
+          
+          # 显示项目结构
+          echo "当前目录: $(pwd)"
+          echo "项目结构:"
+          ls -la
           
           # 验证项目文件
-          echo "验证项目文件格式..."
-          if plutil -lint 123.xcodeproj/project.pbxproj 2>/dev/null; then
-            echo "✅ 项目文件格式有效"
-          else
-            echo "❌ 项目文件格式无效"
-            echo "尝试修复项目文件..."
-            plutil -convert xml1 123.xcodeproj/project.pbxproj 2>/dev/null || echo "无法修复项目文件"
+          if [ -f "123.xcodeproj/project.pbxproj" ]; then
+            echo "检查项目文件格式..."
+            if plutil -lint 123.xcodeproj/project.pbxproj 2>/dev/null; then
+              echo "✅ 项目文件格式有效"
+            else
+              echo "❌ 项目文件格式无效，尝试修复..."
+              plutil -convert xml1 123.xcodeproj/project.pbxproj
+              echo "修复完成"
+            fi
           fi
           
           # 创建构建目录
           mkdir -p build
       
-      # 2. 使用fastlane构建（它会自动处理代码签名）
-      - name: Setup and run fastlane
+      # 2. 测试基础编译（无签名）
+      - name: Test basic compilation
         script: |
-          echo "=== 使用fastlane构建 ==="
+          echo "=== 测试基础编译（无签名）==="
           
-          # 安装fastlane
-          echo "安装fastlane..."
-          sudo gem install fastlane -NV
+          # 清理DerivedData
+          rm -rf ~/Library/Developer/Xcode/DerivedData/*
           
-          # 创建fastlane目录
-          mkdir -p fastlane
-          
-          # 创建Appfile
-          cat > fastlane/Appfile << EOF
-          # 应用标识符
-          app_identifier "$APP_IDENTIFIER"
-          
-          # Apple ID
-          apple_id "$APPLE_ID"
-          
-          # 团队ID
-          team_id "$TEAM_ID"
-          
-          # iTunes Connect团队
-          itc_team_id "$TEAM_ID"
-          EOF
-          
-          # 创建Fastfile
-          cat > fastlane/Fastfile << EOF
-          default_platform(:ios)
-          
-          platform :ios do
-            lane :release do
-              # 构建IPA
-              gym(
-                # 项目配置
-                workspace: "123.xcworkspace",
-                scheme: "$XCODE_SCHEME",
-                configuration: "Release",
-                
-                # 输出配置
-                output_directory: "../build",
-                output_name: "$XCODE_SCHEME.ipa",
-                
-                # 导出配置
-                export_method: "app-store",
-                export_options: {
-                  uploadBitcode: false,
-                  compileBitcode: false
-                },
-                
-                # 其他选项
-                clean: true,
-                silent: false,
-                skip_package_ipa: false,
-                include_symbols: true,
-                include_bitcode: false,
-                
-                # 代码签名配置 - 让fastlane自动处理
-                export_xcargs: "-allowProvisioningUpdates"
-              )
-              
-              # 验证构建
-              verify_build(
-                app_identifier: "$APP_IDENTIFIER"
-              )
-            end
+          # 尝试编译项目，禁用代码签名
+          if [ -d "123.xcworkspace" ]; then
+            echo "使用workspace编译..."
             
-            # 调试用的lane
-            lane :debug_build do
-              # 测试构建
-              gym(
-                workspace: "123.xcworkspace",
-                scheme: "$XCODE_SCHEME",
-                configuration: "Debug",
-                export_method: "development",
-                output_directory: "../build",
-                output_name: "$XCODE_SCHEME-debug.ipa",
-                clean: true
-              )
-            end
-          end
-          EOF
-          
-          echo "✅ fastlane配置创建完成"
-      
-      # 3. 运行fastlane构建
-      - name: Run fastlane build
-        script: |
-          echo "=== 运行fastlane构建 ==="
-          
-          # 进入fastlane目录
-          cd fastlane
-          
-          # 先尝试调试构建（更容易成功）
-          echo "尝试调试构建..."
-          fastlane ios debug_build || echo "调试构建失败，继续..."
-          
-          # 运行发布构建
-          echo "运行发布构建..."
-          fastlane ios release
-          
-          # 返回项目根目录
-          cd ..
-          
-          echo "✅ fastlane构建完成"
-      
-      # 4. 验证构建产物
-      - name: Verify artifacts
-        script: |
-          echo "=== 验证构建产物 ==="
-          
-          # 查找所有IPA文件
-          echo "搜索IPA文件..."
-          find . -name "*.ipa" -type f 2>/dev/null | while read ipa; do
-            echo "找到IPA: $ipa"
-            ls -la "$ipa"
-          done
-          
-          # 检查预期的IPA
-          EXPECTED_IPA="build/$XCODE_SCHEME.ipa"
-          if [ -f "$EXPECTED_IPA" ]; then
-            echo "✅ 找到预期的IPA: $EXPECTED_IPA"
-            echo "文件大小: $(du -h "$EXPECTED_IPA" | cut -f1)"
+            # 清理
+            xcodebuild clean -workspace "123.xcworkspace" -scheme "$XCODE_SCHEME" -configuration Debug 2>&1 | tail -20 || echo "清理失败，继续..."
             
-            # 验证签名
-            echo "验证IPA签名..."
-            codesign -d -vvv "$EXPECTED_IPA" 2>&1 | grep -E "Authority|TeamIdentifier|Identifier" || echo "无法验证签名详情"
-          else
-            echo "❌ 未找到预期的IPA: $EXPECTED_IPA"
-            echo "build目录内容:"
-            ls -la build/ 2>/dev/null || echo "build目录不存在"
+            # 编译（无签名）
+            echo "编译项目..."
+            xcodebuild build \
+              -workspace "123.xcworkspace" \
+              -scheme "$XCODE_SCHEME" \
+              -configuration Debug \
+              -destination 'generic/platform=iOS' \
+              CODE_SIGN_IDENTITY="" \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGNING_ALLOWED=NO \
+              DEVELOPMENT_TEAM="" \
+              2>&1 | tee build/compile.log
             
-            # 尝试查找任何IPA
-            ANY_IPA=$(find . -name "*.ipa" -type f | head -1)
-            if [ -n "$ANY_IPA" ]; then
-              echo "⚠️ 找到其他位置的IPA: $ANY_IPA"
-              echo "复制到build目录..."
-              mkdir -p build
-              cp "$ANY_IPA" "$EXPECTED_IPA"
-              echo "✅ 已复制到: $EXPECTED_IPA"
-            else
-              echo "❌ 未找到任何IPA文件"
-              exit 1
-            fi
+          elif [ -d "123.xcodeproj" ]; then
+            echo "使用project编译..."
+            
+            # 清理
+            xcodebuild clean -project "123.xcodeproj" -scheme "$XCODE_SCHEME" -configuration Debug 2>&1 | tail -20 || echo "清理失败，继续..."
+            
+            # 编译（无签名）
+            echo "编译项目..."
+            xcodebuild build \
+              -project "123.xcodeproj" \
+              -scheme "$XCODE_SCHEME" \
+              -configuration Debug \
+              -destination 'generic/platform=iOS' \
+              CODE_SIGN_IDENTITY="" \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGNING_ALLOWED=NO \
+              DEVELOPMENT_TEAM="" \
+              2>&1 | tee build/compile.log
           fi
       
-      # 5. 显示构建摘要
-      - name: Build summary
+      # 3. 分析编译结果
+      - name: Analyze compilation
         script: |
-          echo "=== 构建摘要 ==="
-          echo "✅ 构建成功!"
-          echo ""
-          echo "生成的产物:"
-          echo "IPA: build/$XCODE_SCHEME.ipa"
-          echo ""
-          echo "文件大小:"
-          du -h "build/$XCODE_SCHEME.ipa" 2>/dev/null || echo "IPA文件不存在"
-          echo ""
-          echo "构建完成时间: $(date)"
+          echo "=== 分析编译结果 ==="
+          
+          if [ -f "build/compile.log" ]; then
+            echo "编译日志最后50行:"
+            tail -50 build/compile.log
+            echo ""
+            
+            # 检查是否成功
+            if grep -q "BUILD SUCCEEDED" build/compile.log; then
+              echo "✅ 编译成功"
+              
+              # 查找.app文件
+              echo "查找编译产物..."
+              find ~/Library/Developer/Xcode/DerivedData -name "*.app" -type d 2>/dev/null | head -5 || echo "未找到.app文件"
+              
+              # 检查是否有编译错误
+              echo "编译错误:"
+              grep -i "error:" build/compile.log | head -10 || echo "无编译错误"
+            else
+              echo "❌ 编译失败"
+              
+              # 显示详细的错误信息
+              echo "详细错误:"
+              grep -A 3 -B 3 -i "error:" build/compile.log | head -50 || echo "无详细错误信息"
+              
+              # 检查常见的编译问题
+              echo "常见问题检查:"
+              
+              # 1. 检查是否缺少文件
+              if grep -q "not found" build/compile.log; then
+                echo "⚠️ 可能缺少文件"
+                grep -i "not found" build/compile.log | head -5
+              fi
+              
+              # 2. 检查是否有语法错误
+              if grep -q "syntax" build/compile.log; then
+                echo "⚠️ 可能有语法错误"
+                grep -i "syntax" build/compile.log | head -5
+              fi
+              
+              # 3. 检查是否有链接错误
+              if grep -q "undefined symbol" build/compile.log; then
+                echo "⚠️ 可能有链接错误"
+                grep -i "undefined symbol" build/compile.log | head -5
+              fi
+            fi
+          else
+            echo "❌ 未找到编译日志"
+          fi
+      
+      # 4. 检查项目配置
+      - name: Check project configuration
+        script: |
+          echo "=== 检查项目配置 ==="
+          
+          # 检查scheme是否存在
+          echo "检查scheme..."
+          if [ -d "123.xcworkspace" ]; then
+            echo "使用workspace检查scheme:"
+            xcodebuild -list -workspace "123.xcworkspace" 2>&1 | head -30 || echo "无法检查scheme"
+          elif [ -d "123.xcodeproj" ]; then
+            echo "使用project检查scheme:"
+            xcodebuild -list -project "123.xcodeproj" 2>&1 | head -30 || echo "无法检查scheme"
+          fi
+          
+          # 检查项目文件中的基本配置
+          if [ -f "123.xcodeproj/project.pbxproj" ]; then
+            echo ""
+            echo "项目文件中的关键配置:"
+            
+            # 检查产品名称
+            echo "产品名称:"
+            grep -i "PRODUCT_NAME" 123.xcodeproj/project.pbxproj | head -3 || echo "未找到产品名称"
+            
+            # 检查bundle identifier
+            echo "Bundle Identifier:"
+            grep -i "PRODUCT_BUNDLE_IDENTIFIER" 123.xcodeproj/project.pbxproj | head -3 || echo "未找到Bundle Identifier"
+            
+            # 检查目标设备
+            echo "目标设备:"
+            grep -i "TARGETED_DEVICE_FAMILY\|IPHONEOS_DEPLOYMENT_TARGET" 123.xcodeproj/project.pbxproj | head -5 || echo "未找到目标设备配置"
+          fi
+      
+      # 5. 创建修复建议
+      - name: Create fix recommendations
+        script: |
+          echo "=== 创建修复建议 ==="
+          
+          # 创建诊断报告
+          cat > build/diagnostic_report.txt << EOF
+          iOS项目诊断报告
+          生成时间: $(date)
+          
+          1. 项目结构:
+          $(ls -la)
+          
+          2. 编译结果:
+          $(if [ -f "build/compile.log" ]; then
+            echo "最后状态:"
+            tail -5 build/compile.log
+          else
+            echo "无编译日志"
+          fi)
+          
+          3. 项目配置摘要:
+          $(if [ -f "123.xcodeproj/project.pbxproj" ]; then
+            echo "产品名称: $(grep -m1 "PRODUCT_NAME = " 123.xcodeproj/project.pbxproj | cut -d= -f2 | tr -d ' ;' 2>/dev/null || echo '未找到')"
+            echo "Bundle ID: $(grep -m1 "PRODUCT_BUNDLE_IDENTIFIER = " 123.xcodeproj/project.pbxproj | cut -d= -f2 | tr -d ' ;' 2>/dev/null || echo '未找到')"
+          else
+            echo "无项目配置文件"
+          fi)
+          
+          4. 修复建议:
+          
+          如果编译失败:
+          - 检查源代码是否有语法错误
+          - 确保所有引用的文件都存在
+          - 检查项目依赖是否正确配置
+          
+          如果代码签名失败:
+          - 在Xcode中重新配置代码签名
+          - 确保Bundle Identifier与配置文件匹配
+          - 确保证书和配置文件有效
+          
+          建议步骤:
+          1. 在本地用Xcode打开项目
+          2. 尝试编译项目
+          3. 检查并修复所有错误
+          4. 确保可以成功运行
+          5. 提交修复后的代码
+          
+          EOF
+          
+          echo "✅ 诊断报告已创建: build/diagnostic_report.txt"
     
     artifacts:
-      - build/*.ipa
-      - fastlane/Appfile
-      - fastlane/Fastfile
+      - build/compile.log
+      - build/diagnostic_report.txt
     
     publishing:
-      # 邮件通知
       email:
         recipients:
           - "717@stlnd.net"
         notify:
           success: true
           failure: true
-      
-      # 发布到App Store Connect
-      app_store_connect:
-        api_key: $APP_STORE_CONNECT_API_KEY
-        key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
-        issuer_id: $APP_STORE_CONNECT_ISSUER_ID
-        submit_to_testflight: true
-        submit_to_app_store: false
-        beta_groups:
-          - "Internal Testers"
