@@ -13,62 +13,162 @@ workflows:
     scripts:
       - name: 安装依赖
         script: |
-          # 如果有Podfile就安装
-          [ -f "Podfile" ] && pod install || echo "没有Podfile"
-      
-      - name: 构建
-        script: |
-          echo "构建IPA..."
-          
-          # 最简单的命令
-          xcode-project build-ipa \
-            --workspace "123.xcworkspace" \
-            --scheme "$XCODE_SCHEME"
-          
-          echo "构建完成!"
-          
-          # 显示构建产物位置
-          echo "=== 构建产物 ==="
-          echo "检查默认输出目录:"
-          ls -la build/ios/ipa/ 2>/dev/null || echo "build/ios/ipa/ 目录不存在"
-          
-          echo "=== 搜索所有IPA文件 ==="
-          find . -name "*.ipa" -type f 2>/dev/null | while read file; do
-            echo "找到IPA: $file"
-            echo "文件大小: $(du -h "$file" | cut -f1)"
-          done
-          
-          echo "=== 当前目录结构 ==="
-          ls -la
-      
-      - name: 验证和准备发布
-        script: |
-          echo "=== 验证构建 ==="
-          
-          # 确保IPA文件存在
-          IPA_FILE=$(find . -name "*.ipa" -type f | head -1)
-          
-          if [ -n "$IPA_FILE" ]; then
-            echo "✅ 找到IPA文件: $IPA_FILE"
-            
-            # 获取IPA信息
-            echo "IPA信息:"
-            xcode-project ipa-info --ipa "$IPA_FILE" || echo "无法获取详细IPA信息"
-            
-            # 复制到标准位置（如果需要）
-            mkdir -p output/ios
-            cp "$IPA_FILE" output/ios/
-            echo "IPA已复制到 output/ios/"
+          echo "检查Podfile..."
+          if [ -f "Podfile" ]; then
+            echo "发现Podfile，安装依赖..."
+            pod install
           else
-            echo "❌ 未找到IPA文件，请检查构建日志"
+            echo "没有Podfile"
+          fi
+      
+      - name: 检查项目配置
+        script: |
+          echo "=== 检查Xcode项目 ==="
+          
+          # 检查workspace是否存在
+          if [ ! -d "123.xcworkspace" ]; then
+            echo "❌ 错误: 123.xcworkspace 不存在"
+            echo "当前目录内容:"
+            ls -la
             exit 1
           fi
+          
+          echo "✅ workspace存在"
+          
+          # 检查scheme
+          echo "检查scheme '$XCODE_SCHEME'..."
+          SCHEMES=$(xcodebuild -workspace "123.xcworkspace" -list -json)
+          echo "可用schemes:"
+          echo "$SCHEMES" | jq -r '.workspace.schemes[]'
+          
+          # 检查代码签名配置
+          echo "检查代码签名配置..."
+          xcodebuild -workspace "123.xcworkspace" -scheme "$XCODE_SCHEME" -showBuildSettings | grep -i "code_sign\|provisioning\|bundle" | head -20
+      
+      - name: 使用配置文件
+        script: |
+          echo "使用Codemagic代码签名配置..."
+          xcode-project use-profiles
+          
+          # 检查证书
+          echo "可用代码签名证书:"
+          security find-identity -v -p codesigning
+      
+      - name: 构建IPA（使用详细日志）
+        script: |
+          echo "开始构建IPA..."
+          
+          # 清理之前的构建
+          rm -rf build 2>/dev/null || true
+          
+          # 使用更详细的构建命令
+          set -x  # 开启命令跟踪
+          
+          # 尝试构建
+          xcode-project build-ipa \
+            --workspace "123.xcworkspace" \
+            --scheme "$XCODE_SCHEME" \
+            --verbose  # 添加详细输出
+          
+          set +x  # 关闭命令跟踪
+          
+          echo "构建命令执行完成"
+      
+      - name: 查找和验证IPA文件
+        script: |
+          echo "=== 搜索IPA文件 ==="
+          
+          # 搜索整个目录
+          echo "搜索所有.ipa文件..."
+          find . -type f -name "*.ipa" 2>/dev/null | while read file; do
+            echo "✅ 找到IPA: $file"
+            echo "  大小: $(du -h "$file" | cut -f1)"
+            echo "  位置: $(dirname "$file")"
+          done
+          
+          # 检查常见的构建输出目录
+          echo "检查常见构建目录:"
+          for dir in "build/ios/ipa" "build" "output" "derivedData" "DerivedData"; do
+            if [ -d "$dir" ]; then
+              echo "检查 $dir:"
+              ls -la "$dir/" 2>/dev/null | head -10 || echo "  目录为空或无法访问"
+            fi
+          done
+          
+          # 如果没有找到IPA，尝试使用xcodebuild手动构建
+          IPA_COUNT=$(find . -type f -name "*.ipa" 2>/dev/null | wc -l)
+          if [ "$IPA_COUNT" -eq "0" ]; then
+            echo "❌ 未找到IPA文件，尝试手动构建..."
+            
+            # 创建exportOptions.plist
+            cat > exportOptions.plist << EOF
+            <?xml version="1.0" encoding="UTF-8"?>
+            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+            <plist version="1.0">
+            <dict>
+                <key>method</key>
+                <string>app-store</string>
+                <key>uploadBitcode</key>
+                <false/>
+                <key>uploadSymbols</key>
+                <true/>
+            </dict>
+            </plist>
+            EOF
+            
+            # 尝试手动构建
+            echo "尝试手动构建..."
+            
+            # 1. 清理
+            xcodebuild clean \
+              -workspace "123.xcworkspace" \
+              -scheme "$XCODE_SCHEME" \
+              -configuration Release
+            
+            # 2. 归档
+            xcodebuild archive \
+              -workspace "123.xcworkspace" \
+              -scheme "$XCODE_SCHEME" \
+              -configuration Release \
+              -destination "generic/platform=iOS" \
+              -archivePath "manual_build/MyApp.xcarchive" \
+              -allowProvisioningUpdates
+            
+            # 3. 导出IPA
+            xcodebuild -exportArchive \
+              -archivePath "manual_build/MyApp.xcarchive" \
+              -exportOptionsPlist "exportOptions.plist" \
+              -exportPath "manual_build/ipa" \
+              -allowProvisioningUpdates
+            
+            # 检查手动构建结果
+            if [ -f "manual_build/ipa/*.ipa" ]; then
+              echo "✅ 手动构建成功！"
+              ls -la manual_build/ipa/
+            else
+              echo "❌ 手动构建也失败了"
+              
+              # 查看归档文件
+              echo "检查归档文件:"
+              ls -la manual_build/ || echo "手动构建目录不存在"
+            fi
+          else
+            echo "✅ 找到 $IPA_COUNT 个IPA文件"
+            
+            # 复制到标准位置
+            mkdir -p output/ios
+            for ipa in $(find . -type f -name "*.ipa" 2>/dev/null | head -5); do
+              cp "$ipa" output/ios/
+              echo "已复制到: output/ios/$(basename "$ipa")"
+            done
+          fi
     
-    # 收集构建产物
+    # 使用通配符收集所有可能的IPA位置
     artifacts:
       - output/ios/*.ipa
-      - build/ios/ipa/*.ipa  # 保留原始位置
-      - build/ios/ipa/*.dSYM.zip  # 调试符号
+      - build/ios/ipa/*.ipa
+      - manual_build/ipa/*.ipa
+      - "**/*.ipa"  # 通配符收集所有IPA
     
     publishing:
       app_store_connect:
@@ -76,18 +176,3 @@ workflows:
         key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
         issuer_id: $APP_STORE_CONNECT_ISSUER_ID
         submit_to_testflight: true
-        
-        # 可选：发布到特定测试组
-        # beta_groups:
-        #   - "Internal Testers"
-        
-        # 可选：自动过期旧构建
-        # expire_build_submitted_for_testing: true
-      
-      # 邮件通知（可选）
-      email:
-        recipients:
-          - 717@stlnd.com
-        notify:
-          success: true
-          failure: true
