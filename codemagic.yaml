@@ -73,42 +73,39 @@ workflows:
           
           echo "应用 Production 签名配置..."
           
-          # 使用 Python 更可靠地处理 plist 文件
-          python3 <<EOF
-import plistlib
+          # 创建 Python 脚本文件
+          cat > fix_signing.py << 'PYTHON_EOF'
+import re
 import os
 
 # 读取项目文件
-with open('123.xcodeproj/project.pbxproj', 'rb') as f:
+with open('123.xcodeproj/project.pbxproj', 'r', encoding='utf-8', errors='ignore') as f:
     content = f.read()
 
-# 转换为字符串
-content_str = content.decode('utf-8', errors='ignore')
+# 替换自动签名设置
+replacements = [
+    (r'ProvisioningStyle = Manual;', 'ProvisioningStyle = Automatic;'),
+    (r'CODE_SIGN_STYLE = Manual;', 'CODE_SIGN_STYLE = Automatic;'),
+    (r'DEVELOPMENT_TEAM = "";', 'DEVELOPMENT_TEAM = "' + os.environ.get('TEAM_ID', '') + '";'),
+    (r'CODE_SIGN_IDENTITY = "";', 'CODE_SIGN_IDENTITY = "iPhone Distribution";'),
+    (r'"CODE_SIGN_IDENTITY\[sdk=iphoneos\*\]" = "";', '"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Distribution";'),
+    (r'PRODUCT_BUNDLE_IDENTIFIER = "";', 'PRODUCT_BUNDLE_IDENTIFIER = "' + os.environ.get('APP_IDENTIFIER', '') + '";'),
+    (r'PROVISIONING_PROFILE_SPECIFIER = "";', 'PROVISIONING_PROFILE_SPECIFIER = "' + os.environ.get('APP_IDENTIFIER', '') + '";'),
+    (r'"PROVISIONING_PROFILE_SPECIFIER\[sdk=iphoneos\*\]" = "";', '"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "' + os.environ.get('APP_IDENTIFIER', '') + '";'),
+]
 
-# 设置自动签名
-content_str = content_str.replace('ProvisioningStyle = Manual;', 'ProvisioningStyle = Automatic;')
-content_str = content_str.replace('CODE_SIGN_STYLE = Manual;', 'CODE_SIGN_STYLE = Automatic;')
-
-# 设置团队ID
-content_str = content_str.replace('DEVELOPMENT_TEAM = "";', 'DEVELOPMENT_TEAM = "$TEAM_ID";')
-
-# 设置 Release 配置的代码签名标识
-content_str = content_str.replace('CODE_SIGN_IDENTITY = "";', 'CODE_SIGN_IDENTITY = "iPhone Distribution";')
-content_str = content_str.replace('"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "";', '"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Distribution";')
-
-# 设置 bundle identifier
-content_str = content_str.replace('PRODUCT_BUNDLE_IDENTIFIER = "";', 'PRODUCT_BUNDLE_IDENTIFIER = "$APP_IDENTIFIER";')
-
-# 设置 Release 配置的配置文件
-content_str = content_str.replace('PROVISIONING_PROFILE_SPECIFIER = "";', 'PROVISIONING_PROFILE_SPECIFIER = "$APP_IDENTIFIER";')
-content_str = content_str.replace('"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "";', '"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "$APP_IDENTIFIER";')
+for pattern, replacement in replacements:
+    content = re.sub(pattern, replacement, content)
 
 # 写回文件
 with open('123.xcodeproj/project.pbxproj', 'w', encoding='utf-8') as f:
-    f.write(content_str)
+    f.write(content)
 
 print("✅ 项目配置已更新")
-EOF
+PYTHON_EOF
+          
+          # 运行 Python 脚本
+          python3 fix_signing.py
           
           echo "配置摘要:"
           grep -E "ProvisioningStyle|CODE_SIGN_STYLE|DEVELOPMENT_TEAM|PRODUCT_BUNDLE_IDENTIFIER|CODE_SIGN_IDENTITY|PROVISIONING_PROFILE" 123.xcodeproj/project.pbxproj | head -20
@@ -287,6 +284,7 @@ EOF
           rm -rf build/*.xcarchive
           rm -rf build/*.log
           rm -rf build/ExportOptions.plist
+          rm -f fix_signing.py
           
           # 显示最终构建产物
           echo "最终构建产物:"
@@ -335,6 +333,6 @@ EOF
     publishing:
       email:
         recipients:
-          - "717@stln.net"
+          - "717@stlnd.net"
         notify:
           always: true
