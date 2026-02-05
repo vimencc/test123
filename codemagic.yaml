@@ -6,8 +6,7 @@ workflows:
     environment:
       xcode: latest
       groups:
-        - appstore_connect
-        - certificate_credentials  # 新增证书相关环境变量组
+        - appstore_connect  # 仅保留App Store Connect API密钥组
       vars:
         # 基础配置
         APP_IDENTIFIER: "com.test.ios.attaf"
@@ -48,7 +47,7 @@ workflows:
           echo "检查钥匙串..."
           security list-keychains
           
-          # 检查所有可用证书（不筛选）
+          # 检查所有可用证书
           echo "检查所有证书:"
           security find-identity -p codesigning -v
           
@@ -67,6 +66,10 @@ workflows:
           # 再次检查证书
           echo "应用后检查证书:"
           security find-identity -p codesigning -v
+          
+          # 显示已安装的配置文件
+          echo "已安装的配置文件:"
+          ls -la ~/Library/MobileDevice/Provisioning\ Profiles/ 2>/dev/null | head -10 || echo "无配置文件"
       
       # 3. 构建archive（让Xcode自动处理签名）
       - name: Build archive with auto signing
@@ -231,7 +234,7 @@ workflows:
       # 邮件通知
       email:
         recipients:
-          - "717@stln.net"
+          - "717@stlnd.net"
         notify:
           success: true
           failure: true
