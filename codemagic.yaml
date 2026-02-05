@@ -286,7 +286,7 @@ workflows:
       # 邮件通知
       email:
         recipients:
-          - "lingya00130@gmail.com"
+          - "717@stlnd.net"
         notify:
           success: true
           failure: true
