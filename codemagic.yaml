@@ -1,58 +1,44 @@
 workflows:
-  ios-release:  # 工作流名称
-    name: iOS Release
+  ios-simple:
+    name: iOS Simple Build
     environment:
-      xcode: latest  # 使用最新版本的 Xcode
-      cocoapods: default  # 使用默认的 CocoaPods 版本
+      xcode: latest
+      cocoapods: default
       vars:
-        BUNDLE_ID: "com.test.ios.attaf"  # 你的应用包标识符
-        XCODE_WORKSPACE: "123.xcworkspace"  # 你的 Xcode 工作空间文件
-        XCODE_SCHEME: "123"  # 你的 Xcode 方案
-        APP_STORE_CONNECT_ISSUER_ID: $APP_STORE_CONNECT_ISSUER_ID  # 从环境变量中获取 App Store Connect 的 Issuer ID
-        APP_STORE_CONNECT_KEY_IDENTIFIER: $APP_STORE_CONNECT_KEY_IDENTIFIER  # 从环境变量中获取 App Store Connect 的密钥标识符
-        APP_STORE_CONNECT_PRIVATE_KEY: $APP_STORE_CONNECT_PRIVATE_KEY  # 从环境变量中获取 App Store Connect 的私钥
-        CERTIFICATE_PRIVATE_KEY: $CERTIFICATE_PRIVATE_KEY  # 从环境变量中获取证书私钥
+        BUNDLE_ID: "com.test.ios.attaf"
       ios_signing:
-        distribution_type: app_store  # 分发类型，可以是 development, ad_hoc, 或 app_store
+        distribution_type: app_store
         bundle_identifier: $BUNDLE_ID
+        certificate_type: ios_distribution
+    
     scripts:
-      - name: 安装 CocoaPods 依赖
+      # 尝试自动查找并安装pods
+      - name: 安装依赖
         script: |
-          pod install
-      - name: 设置代码签名
-        script: |
-          # 导入证书和配置文件
-          keychain initialize
-          echo $CERTIFICATE_PRIVATE_KEY | base64 --decode > certificate.p12
-          keychain add-certificates --certificate certificate.p12 --certificate-password $CERTIFICATE_PASSWORD
-          # 设置配置文件（这里使用自动签名，但也可以指定配置文件）
-          # 注意：如果使用自动签名，确保在 Xcode 项目中设置了正确的团队和包标识符
-          # 如果不是自动签名，需要下载和安装配置文件
-      - name: 构建应用
+          # 如果找到Podfile就安装
+          if [ -f "Podfile" ]; then
+            pod install
+          elif [ -f "ios/Podfile" ]; then
+            cd ios
+            pod install
+          else
+            echo "未找到Podfile，跳过pod install"
+          fi
+      
+      # 使用Codemagic提供的简化构建命令
+      - name: 构建和导出
         script: |
           xcode-project build-ios \
-            --workspace "$XCODE_WORKSPACE" \
-            --scheme "$XCODE_SCHEME" \
-            --output "build/ios/ipa"
-      - name: 打包为 IPA
-        script: |
-          xcode-project export-ipa \
-            --workspace "$XCODE_WORKSPACE" \
-            --scheme "$XCODE_SCHEME" \
-            --output "build/ios/ipa"
+            --workspace "$(find . -name '*.xcworkspace' -type d | head -1)" \
+            --scheme "$(xcodebuild -list -json | jq -r '.workspace.schemes[0]')" \
+            --export-options-plist-config '{"method": "app-store"}'
+    
     artifacts:
       - build/ios/ipa/*.ipa
-      - build/ios/ipa/*.dSYM.zip  # 如果需要调试符号
+    
     publishing:
       app_store_connect:
         api_key: $APP_STORE_CONNECT_PRIVATE_KEY
         key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
         issuer_id: $APP_STORE_CONNECT_ISSUER_ID
-        submit_to_testflight: true  # 提交到 TestFlight
-        submit_to_app_store: false  # 不提交到 App Store，仅 TestFlight
-      email:
-        recipients:
-          - 717@stlnd.com
-        notify:
-          success: true
-          failure: true
+        submit_to_testflight: true
