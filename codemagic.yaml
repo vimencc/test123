@@ -1,17 +1,11 @@
 workflows:
-  ios-release:
-    name: iOS App Store Release
+  ios-diagnostic:
+    name: iOS Diagnostic Build
     max_build_duration: 120
     instance_type: mac_mini_m2
     environment:
       xcode: latest
-      groups:
-        - appstore_connect
       vars:
-        # 基础配置
-        APP_IDENTIFIER: "com.test.ios.attaf"
-        APPLE_ID: "lingya00130@gmail.com"
-        TEAM_ID: "7994453ZHZ"
         XCODE_SCHEME: "123"
     
     triggering:
@@ -20,85 +14,82 @@ workflows:
       branch_patterns:
         - pattern: 'main'
           include: true
-        - pattern: 'release/*'
-          include: true
       cancel_previous_builds: false
     
-    cache:
-      cache_paths:
-        - ~/Library/Caches/CocoaPods
-        - ~/Library/Developer/Xcode/DerivedData
-        - vendor/bundle
-    
     scripts:
-      # 1. 安装依赖和显示详细信息
-      - name: Setup and diagnose
+      # 1. 详细显示项目结构
+      - name: Detailed project structure
         script: |
-          echo "=== 设置和诊断 ==="
+          echo "=== 详细项目结构 ==="
           echo "当前目录: $(pwd)"
-          echo "完整目录结构:"
-          find . -maxdepth 3 -type d | sort
-          
           echo ""
-          echo "Xcode项目详情:"
+          echo "所有文件和目录:"
+          find . -maxdepth 2 -type d | sort
+          echo ""
           
-          # 检查workspace
+          # 检查关键文件
+          echo "关键文件检查:"
+          echo "123.xcworkspace 是否存在: $([ -d "123.xcworkspace" ] && echo "✅ 存在" || echo "❌ 不存在")"
+          echo "123.xcodeproj 是否存在: $([ -d "123.xcodeproj" ] && echo "✅ 存在" || echo "❌ 不存在")"
+          echo "Podfile 是否存在: $([ -f "Podfile" ] && echo "✅ 存在" || echo "❌ 不存在")"
+          
           if [ -d "123.xcworkspace" ]; then
-            echo "✅ 找到workspace: 123.xcworkspace"
-            echo "workspace内容:"
+            echo ""
+            echo "123.xcworkspace 目录内容:"
             ls -la "123.xcworkspace/"
-            echo ""
-            echo "列出所有scheme:"
-            xcodebuild -list -workspace "123.xcworkspace" 2>&1 || echo "无法列出workspace的scheme"
-          else
-            echo "❌ 未找到workspace: 123.xcworkspace"
           fi
           
-          echo ""
-          
-          # 检查project
           if [ -d "123.xcodeproj" ]; then
-            echo "✅ 找到project: 123.xcodeproj"
-            echo "project内容:"
-            ls -la "123.xcodeproj/"
             echo ""
-            echo "列出所有scheme:"
-            xcodebuild -list -project "123.xcodeproj" 2>&1 || echo "无法列出project的scheme"
-          else
-            echo "❌ 未找到project: 123.xcodeproj"
+            echo "123.xcodeproj 目录内容:"
+            ls -la "123.xcodeproj/"
           fi
-          
-          echo ""
-          echo "检查Podfile:"
-          if [ -f "Podfile" ]; then
-            echo "✅ 找到Podfile"
-            echo "安装CocoaPods依赖..."
-            pod install
-          else
-            echo "❌ 未找到Podfile"
-          fi
-          
-          # 创建必要目录
-          mkdir -p build
-          mkdir -p fastlane
-          
-          echo "✅ 设置完成"
       
-      # 2. 测试基础构建（无签名）
-      - name: Test basic build
+      # 2. 检查Xcode项目配置
+      - name: Check Xcode project configuration
         script: |
-          echo "=== 测试基础构建（无签名） ==="
+          echo "=== 检查Xcode项目配置 ==="
           
-          # 尝试使用workspace
+          # 检查project.pbxproj文件
+          if [ -f "123.xcodeproj/project.pbxproj" ]; then
+            echo "✅ 找到项目配置文件"
+            
+            # 检查target
+            echo "检查target配置..."
+            grep -n "name = " "123.xcodeproj/project.pbxproj" | grep -i "123" || echo "未找到包含'123'的target"
+            
+            # 检查product name
+            echo "检查产品名称..."
+            grep -n "PRODUCT_NAME" "123.xcodeproj/project.pbxproj" | head -10 || echo "未找到PRODUCT_NAME"
+            
+            # 检查bundle identifier
+            echo "检查bundle identifier..."
+            grep -n "PRODUCT_BUNDLE_IDENTIFIER" "123.xcodeproj/project.pbxproj" | head -5 || echo "未找到PRODUCT_BUNDLE_IDENTIFIER"
+          else
+            echo "❌ 未找到项目配置文件"
+          fi
+      
+      # 3. 尝试最简单的构建命令
+      - name: Simplest build test
+        script: |
+          echo "=== 最简单的构建测试 ==="
+          
+          # 创建一个测试用的build目录
+          mkdir -p build_test
+          
+          # 首先，检查是否可以列出scheme
+          echo "1. 检查scheme列表..."
+          
           if [ -d "123.xcworkspace" ]; then
-            echo "使用workspace测试构建..."
+            echo "尝试列出workspace的scheme:"
+            xcodebuild -list -workspace "123.xcworkspace" 2>&1 || echo "无法列出scheme"
             
-            # 清理
-            echo "清理项目..."
-            xcodebuild clean -workspace "123.xcworkspace" -scheme "$XCODE_SCHEME" -configuration Debug 2>&1 | tail -20 || echo "清理失败，继续..."
+            echo ""
+            echo "2. 尝试清理项目..."
+            xcodebuild clean -workspace "123.xcworkspace" -scheme "$XCODE_SCHEME" -configuration Debug 2>&1 | tail -20 || echo "清理失败"
             
-            # 构建测试
-            echo "构建测试..."
+            echo ""
+            echo "3. 尝试构建（无签名）..."
             xcodebuild build \
               -workspace "123.xcworkspace" \
               -scheme "$XCODE_SCHEME" \
@@ -107,18 +98,18 @@ workflows:
               CODE_SIGN_IDENTITY="" \
               CODE_SIGNING_REQUIRED=NO \
               CODE_SIGNING_ALLOWED=NO \
-              2>&1 | tee build_log.txt || echo "构建测试失败"
-            
-          # 尝试使用project
+              2>&1 | tee build_test/simple_build.log
+              
           elif [ -d "123.xcodeproj" ]; then
-            echo "使用project测试构建..."
+            echo "尝试列出project的scheme:"
+            xcodebuild -list -project "123.xcodeproj" 2>&1 || echo "无法列出scheme"
             
-            # 清理
-            echo "清理项目..."
-            xcodebuild clean -project "123.xcodeproj" -scheme "$XCODE_SCHEME" -configuration Debug 2>&1 | tail -20 || echo "清理失败，继续..."
+            echo ""
+            echo "2. 尝试清理项目..."
+            xcodebuild clean -project "123.xcodeproj" -scheme "$XCODE_SCHEME" -configuration Debug 2>&1 | tail -20 || echo "清理失败"
             
-            # 构建测试
-            echo "构建测试..."
+            echo ""
+            echo "3. 尝试构建（无签名）..."
             xcodebuild build \
               -project "123.xcodeproj" \
               -scheme "$XCODE_SCHEME" \
@@ -127,309 +118,122 @@ workflows:
               CODE_SIGN_IDENTITY="" \
               CODE_SIGNING_REQUIRED=NO \
               CODE_SIGNING_ALLOWED=NO \
-              2>&1 | tee build_log.txt || echo "构建测试失败"
+              2>&1 | tee build_test/simple_build.log
           else
             echo "❌ 没有可用的项目文件"
+            exit 1
           fi
           
-          echo "✅ 基础构建测试完成"
+          echo "✅ 简单构建测试完成"
       
-      # 3. 检查构建测试结果
-      - name: Check test build
+      # 4. 分析构建结果
+      - name: Analyze build results
         script: |
-          echo "=== 检查构建测试结果 ==="
+          echo "=== 分析构建结果 ==="
           
-          # 检查是否有构建日志
-          if [ -f "build_log.txt" ]; then
-            echo "构建日志最后50行:"
-            tail -50 build_log.txt
-          fi
-          
-          # 查找.app文件
-          echo "查找构建产物..."
-          APP_FILES=$(find ~/Library/Developer/Xcode/DerivedData -name "*.app" -type d 2>/dev/null | head -5)
-          
-          if [ -n "$APP_FILES" ]; then
-            echo "✅ 找到.app文件:"
-            echo "$APP_FILES"
+          if [ -f "build_test/simple_build.log" ]; then
+            echo "构建日志文件大小: $(wc -l < build_test/simple_build.log) 行"
+            echo ""
+            echo "最后50行日志:"
+            tail -50 build_test/simple_build.log
+            echo ""
+            
+            # 检查是否有错误
+            echo "检查错误信息:"
+            grep -i "error:" build_test/simple_build.log | head -20 || echo "未找到错误信息"
+            echo ""
+            
+            # 检查是否有警告
+            echo "检查警告信息:"
+            grep -i "warning:" build_test/simple_build.log | head -10 || echo "未找到警告信息"
+            echo ""
+            
+            # 检查是否成功
+            if grep -q "BUILD SUCCEEDED" build_test/simple_build.log; then
+              echo "✅ 构建成功"
+              
+              # 查找.app文件
+              echo "查找生成的.app文件:"
+              find ~/Library/Developer/Xcode/DerivedData -name "*.app" -type d 2>/dev/null | head -5 || echo "未找到.app文件"
+            else
+              echo "❌ 构建失败"
+              
+              # 显示更多错误信息
+              echo "可能的关键错误:"
+              grep -A 2 -B 2 -i "error:" build_test/simple_build.log | head -30 || echo "没有更多错误信息"
+            fi
           else
-            echo "❌ 未找到.app文件"
-            echo "DerivedData目录内容:"
-            find ~/Library/Developer/Xcode/DerivedData -type d -name "*123*" 2>/dev/null | head -10 || echo "无相关内容"
+            echo "❌ 未找到构建日志文件"
           fi
       
-      # 4. 准备代码签名
-      - name: Prepare code signing
+      # 5. 尝试使用xcodebuild的-showBuildSettings
+      - name: Check build settings
         script: |
-          echo "=== 准备代码签名 ==="
-          
-          # 显示证书
-          echo "可用证书:"
-          security find-identity -p codesigning -v
-          
-          # 创建简单的export_options.plist
-          cat > export_options.plist << EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>method</key>
-              <string>app-store</string>
-              <key>teamID</key>
-              <string>$TEAM_ID</string>
-              <key>uploadBitcode</key>
-              <false/>
-              <key>compileBitcode</key>
-              <false/>
-          </dict>
-          </plist>
-          EOF
-          
-          echo "✅ 代码签名准备完成"
-      
-      # 5. 尝试手动构建和导出
-      - name: Manual build and export
-        script: |
-          echo "=== 手动构建和导出 ==="
-          
-          # 清理build目录
-          rm -rf build/*
-          
-          # 尝试构建archive
-          echo "构建archive..."
+          echo "=== 检查构建设置 ==="
           
           if [ -d "123.xcworkspace" ]; then
-            echo "使用workspace构建archive..."
-            
-            # 构建archive
-            xcodebuild archive \
-              -workspace "123.xcworkspace" \
-              -scheme "$XCODE_SCHEME" \
-              -configuration Release \
-              -archivePath "build/$XCODE_SCHEME.xcarchive" \
-              -destination 'generic/platform=iOS' \
-              -allowProvisioningUpdates \
-              2>&1 | tee archive_log.txt
-            
-            # 检查archive是否创建成功
-            if [ -d "build/$XCODE_SCHEME.xcarchive" ]; then
-              echo "✅ archive创建成功"
-              
-              # 导出IPA
-              echo "导出IPA..."
-              xcodebuild -exportArchive \
-                -archivePath "build/$XCODE_SCHEME.xcarchive" \
-                -exportOptionsPlist "export_options.plist" \
-                -exportPath "build" \
-                -allowProvisioningUpdates \
-                2>&1 | tee export_log.txt
-                
-              if [ -f "build/$XCODE_SCHEME.ipa" ]; then
-                echo "✅ IPA导出成功"
-              else
-                echo "❌ IPA导出失败"
-                echo "检查导出日志:"
-                tail -50 export_log.txt || true
-              fi
-            else
-              echo "❌ archive创建失败"
-              echo "检查archive日志:"
-              tail -50 archive_log.txt || true
-            fi
-            
+            echo "使用workspace检查构建设置:"
+            xcodebuild -showBuildSettings -workspace "123.xcworkspace" -scheme "$XCODE_SCHEME" 2>&1 | head -50 || echo "无法获取构建设置"
           elif [ -d "123.xcodeproj" ]; then
-            echo "使用project构建archive..."
-            
-            # 构建archive
-            xcodebuild archive \
-              -project "123.xcodeproj" \
-              -scheme "$XCODE_SCHEME" \
-              -configuration Release \
-              -archivePath "build/$XCODE_SCHEME.xcarchive" \
-              -destination 'generic/platform=iOS' \
-              -allowProvisioningUpdates \
-              2>&1 | tee archive_log.txt
-            
-            # 检查archive是否创建成功
-            if [ -d "build/$XCODE_SCHEME.xcarchive" ]; then
-              echo "✅ archive创建成功"
-              
-              # 导出IPA
-              echo "导出IPA..."
-              xcodebuild -exportArchive \
-                -archivePath "build/$XCODE_SCHEME.xcarchive" \
-                -exportOptionsPlist "export_options.plist" \
-                -exportPath "build" \
-                -allowProvisioningUpdates \
-                2>&1 | tee export_log.txt
-                
-              if [ -f "build/$XCODE_SCHEME.ipa" ]; then
-                echo "✅ IPA导出成功"
-              else
-                echo "❌ IPA导出失败"
-                echo "检查导出日志:"
-                tail -50 export_log.txt || true
-              fi
-            else
-              echo "❌ archive创建失败"
-              echo "检查archive日志:"
-              tail -50 archive_log.txt || true
-            fi
-          else
-            echo "❌ 没有可用的项目文件"
+            echo "使用project检查构建设置:"
+            xcodebuild -showBuildSettings -project "123.xcodeproj" -scheme "$XCODE_SCHEME" 2>&1 | head -50 || echo "无法获取构建设置"
           fi
       
-      # 6. 备用方案：使用fastlane
-      - name: Fallback with fastlane
+      # 6. 创建项目修复建议
+      - name: Create project fix suggestions
         script: |
-          echo "=== 备用方案：使用fastlane ==="
+          echo "=== 项目修复建议 ==="
           
-          # 检查是否已有IPA
-          if [ -f "build/$XCODE_SCHEME.ipa" ]; then
-            echo "✅ 已有IPA文件，跳过备用方案"
-            exit 0
-          fi
+          # 创建修复建议文件
+          cat > build_test/fix_suggestions.md << 'EOF'
+          # iOS项目修复建议
           
-          echo "尝试fastlane构建..."
+          根据构建日志分析，以下可能是问题的原因和解决方案：
           
-          # 安装fastlane
-          sudo gem install fastlane -NV
+          ## 1. 检查Scheme配置
+          - 在Xcode中打开项目
+          - 点击顶部Scheme选择器
+          - 选择"Manage Schemes..."
+          - 确保有一个名为"123"的Scheme
+          - 如果没有，点击"+"创建新Scheme
           
-          # 创建fastlane配置
-          cat > fastlane/Fastfile << EOF
-          default_platform(:ios)
+          ## 2. 检查Target配置
+          - 在Xcode中，检查左侧项目导航器
+          - 确保有名为"123"的Target
+          - 检查Target的Build Settings
           
-          platform :ios do
-            lane :build_ipa do
-              # 先尝试构建
-              if File.directory?("123.xcworkspace")
-                puts "使用workspace构建"
-                build_app(
-                  workspace: "123.xcworkspace",
-                  scheme: "$XCODE_SCHEME",
-                  configuration: "Release",
-                  clean: true,
-                  skip_package_ipa: false
-                )
-              elsif File.directory?("123.xcodeproj")
-                puts "使用project构建"
-                build_app(
-                  project: "123.xcodeproj",
-                  scheme: "$XCODE_SCHEME",
-                  configuration: "Release",
-                  clean: true,
-                  skip_package_ipa: false
-                )
-              else
-                UI.error("未找到Xcode项目文件")
-              end
-            end
-          end
+          ## 3. 检查Bundle Identifier
+          - 在Xcode中，选择Target
+          - 检查General标签页中的Bundle Identifier
+          - 确保不是空的
+          
+          ## 4. 检查项目文件完整性
+          - 确保所有源代码文件都存在
+          - 检查是否有文件引用但实际不存在
+          
+          ## 5. 尝试创建新项目
+          如果上述方法都失败，考虑：
+          1. 在Xcode中创建新iOS项目
+          2. 命名为"123"
+          3. 复制现有源代码到新项目
+          4. 重新配置
+          
+          ## 6. 检查CocoaPods配置（如果使用）
+          - 确保Podfile存在且正确
+          - 运行`pod install`
+          - 使用生成的.xcworkspace文件
+          
           EOF
           
-          # 运行fastlane
-          cd fastlane
-          fastlane ios build_ipa 2>&1 | tee fastlane_log.txt
-          cd ..
-          
-          echo "✅ fastlane完成"
-      
-      # 7. 收集和显示所有构建日志
-      - name: Collect and show logs
-        script: |
-          echo "=== 所有构建日志 ==="
-          
-          echo "1. 基础构建测试日志:"
-          if [ -f "build_log.txt" ]; then
-            echo "最后100行:"
-            tail -100 build_log.txt
-          fi
-          
-          echo ""
-          echo "2. Archive构建日志:"
-          if [ -f "archive_log.txt" ]; then
-            echo "最后100行:"
-            tail -100 archive_log.txt
-          fi
-          
-          echo ""
-          echo "3. 导出日志:"
-          if [ -f "export_log.txt" ]; then
-            echo "最后100行:"
-            tail -100 export_log.txt
-          fi
-          
-          echo ""
-          echo "4. Fastlane日志:"
-          if [ -f "fastlane/fastlane_log.txt" ]; then
-            echo "最后100行:"
-            tail -100 fastlane/fastlane_log.txt
-          fi
-          
-          echo ""
-          echo "✅ 日志收集完成"
-      
-      # 8. 验证构建产物
-      - name: Verify artifacts
-        script: |
-          echo "=== 验证构建产物 ==="
-          
-          # 搜索所有IPA文件
-          echo "搜索IPA文件..."
-          find . -name "*.ipa" -type f 2>/dev/null | while read ipa; do
-            echo "找到IPA: $ipa"
-            ls -la "$ipa"
-          done
-          
-          # 检查预期的IPA
-          EXPECTED_IPA="build/$XCODE_SCHEME.ipa"
-          if [ -f "$EXPECTED_IPA" ]; then
-            echo "✅ 找到预期的IPA: $EXPECTED_IPA"
-            echo "文件大小: $(du -h "$EXPECTED_IPA" | cut -f1)"
-          else
-            echo "❌ 未找到预期的IPA: $EXPECTED_IPA"
-            echo "build目录内容:"
-            ls -la build/ 2>/dev/null || echo "build目录不存在"
-            
-            # 尝试查找任何IPA
-            ANY_IPA=$(find . -name "*.ipa" -type f | head -1)
-            if [ -n "$ANY_IPA" ]; then
-              echo "⚠️ 找到其他位置的IPA: $ANY_IPA"
-              echo "复制到build目录..."
-              mkdir -p build
-              cp "$ANY_IPA" "$EXPECTED_IPA"
-              echo "✅ 已复制到: $EXPECTED_IPA"
-            else
-              echo "❌ 未找到任何IPA文件"
-              echo "构建可能失败了，请查看上面的日志了解详情"
-              exit 1
-            fi
-          fi
+          echo "✅ 修复建议已创建: build_test/fix_suggestions.md"
     
     artifacts:
-      - build/*.ipa
-      - build/*.xcarchive
-      - export_options.plist
-      - build_log.txt 2>/dev/null || true
-      - archive_log.txt 2>/dev/null || true
-      - export_log.txt 2>/dev/null || true
-      - fastlane/fastlane_log.txt 2>/dev/null || true
+      - build_test/
     
     publishing:
-      # 邮件通知
       email:
         recipients:
           - "lingya00130@gmail.com"
         notify:
           success: true
           failure: true
-      
-      # 发布到App Store Connect（如果构建成功）
-      app_store_connect:
-        api_key: $APP_STORE_CONNECT_API_KEY
-        key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
-        issuer_id: $APP_STORE_CONNECT_ISSUER_ID
-        submit_to_testflight: true
-        submit_to_app_store: false
-        beta_groups:
-          - "Internal Testers"
