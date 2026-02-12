@@ -4,8 +4,8 @@ workflows:
     environment:
       xcode: latest
       vars:
-        BUNDLE_ID: "test.bundleid"
-        XCODE_SCHEME: "testshcheme"
+        BUNDLE_ID: "com.test.ios.attaf"
+        XCODE_SCHEME: "123"
       
       # 添加环境变量组
       groups:
@@ -56,13 +56,13 @@ workflows:
           
           # 构建
           xcode-project build-ipa \
-            --workspace "testshcheme.xcworkspace" \
+            --workspace "123.xcworkspace" \
             --scheme "$XCODE_SCHEME"
       
       - name: 验证
         script: |
           # 简单验证
-          if [ -f "build/ios/ipa/testshcheme.ipa" ]; then
+          if [ -f "build/ios/ipa/123.ipa" ]; then
             echo "✅ IPA构建成功!"
           else
             echo "❌ IPA构建失败"
@@ -70,7 +70,7 @@ workflows:
           fi
     
     artifacts:
-      - build/ios/ipa/testshcheme.ipa
+      - build/ios/ipa/123.ipa
     
     publishing:
       app_store_connect:
