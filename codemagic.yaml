@@ -6,23 +6,76 @@ workflows:
       vars:
         BUNDLE_ID: "com.test.ios.attaf"
         XCODE_SCHEME: "123"
-    scripts:
-      - name: Install CocoaPods
-        script: |
-          [ -f "Podfile" ] && pod install || true
       
-      - name: Build IPA
+      # 添加环境变量组
+      groups:
+        - app_store_connect  # 这个组应该包含正确的私钥
+      
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: $BUNDLE_ID
+    
+    scripts:
+      - name: 验证环境变量
         script: |
+          echo "检查App Store Connect环境变量..."
+          
+          # 检查私钥是否存在
+          if [ -n "$APP_STORE_CONNECT_PRIVATE_KEY" ]; then
+            echo "✅ APP_STORE_CONNECT_PRIVATE_KEY 已设置"
+            echo "前100个字符:"
+            echo "$APP_STORE_CONNECT_PRIVATE_KEY" | head -c 100
+            echo ""
+            
+            # 检查私钥格式
+            if [[ "$APP_STORE_CONNECT_PRIVATE_KEY" == *"-----BEGIN PRIVATE KEY-----"* ]]; then
+              echo "✅ 私钥格式正确（包含BEGIN标记）"
+            else
+              echo "❌ 私钥格式错误：缺少BEGIN标记"
+            fi
+            
+            if [[ "$APP_STORE_CONNECT_PRIVATE_KEY" == *"-----END PRIVATE KEY-----"* ]]; then
+              echo "✅ 私钥格式正确（包含END标记）"
+            else
+              echo "❌ 私钥格式错误：缺少END标记"
+            fi
+          else
+            echo "❌ APP_STORE_CONNECT_PRIVATE_KEY 未设置"
+          fi
+          
+          echo "Key ID: $APP_STORE_CONNECT_KEY_IDENTIFIER"
+          echo "Issuer ID: $APP_STORE_CONNECT_ISSUER_ID"
+      
+      - name: 构建
+        script: |
+          # 安装依赖
+          [ -f "Podfile" ] && pod install || true
+          
+          # 代码签名
+          xcode-project use-profiles
+          
+          # 构建
           xcode-project build-ipa \
             --workspace "123.xcworkspace" \
             --scheme "$XCODE_SCHEME"
+      
+      - name: 验证
+        script: |
+          # 简单验证
+          if [ -f "build/ios/ipa/123.ipa" ]; then
+            echo "✅ IPA构建成功!"
+          else
+            echo "❌ IPA构建失败"
+            exit 1
+          fi
     
     artifacts:
       - build/ios/ipa/123.ipa
     
     publishing:
       app_store_connect:
-        api_key: $APP_STORE_CONNECT_PRIVATE_KEY
+        api_key: $APP_STORE_CONNECT_PRIVATE_KEY  # 使用正确的变量名
         key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
         issuer_id: $APP_STORE_CONNECT_ISSUER_ID
         submit_to_testflight: true
+        submit_to_app_store: false
